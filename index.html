@@ -520,6 +520,7 @@ function applyAccent(line) {
 
 // ---------- network ----------
 const STCP = 'https://stcp.pt';
+const PAGES_PROXY = 'https://paragem-proxy.adrianogpena.workers.dev';
 let apiBase = null;           // chosen after the first successful call
 let lastNetError = null;
 
@@ -528,6 +529,8 @@ class ApiError extends Error { constructor(kind, msg, detail) { super(msg); this
 function candidates() {
   const c = [];
   if (state.settings.proxy) c.push(state.settings.proxy.replace(/\/+$/, ''));
+  // The published copy on GitHub Pages comes with its own Worker (ALLOWED_ORIGIN is that Pages origin).
+  if (/github\.io$/.test(location.hostname) && !c.includes(PAGES_PROXY)) c.push(PAGES_PROXY);
   // When this page is served by the local proxy or a Worker, its own /api is the best bet.
   if (/^https?:$/.test(location.protocol) && !/github\.io$/.test(location.hostname) && !c.includes(location.origin)) c.push(location.origin);
   c.push(STCP);
