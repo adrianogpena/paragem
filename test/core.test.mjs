@@ -185,6 +185,43 @@ await test('a bus missing from my cut-off list only counts as passed if it is du
   eq([p.tripId, p.nextIdx], [PASSED, idx('ACRD1')]);
 });
 
+// ---- UNIR timetables ----
+const tt = (prg, designa, lat, lon, rows) => ({ prg, designa, lat, lon, horarios: rows.map(([trip_id, chegada, linha, destino]) => ({ trip_id, chegada, linha, destino })) });
+const DJ = tt('vng:255', 'D. João II (Metro)', 41.1196, -8.6064, [
+  ['T1', '17:10:00', '9011', 'Lever'], ['T2', '17:15:00', '9030', 'Sandim (Sá)'], ['T3', '17:20:00', '9025', 'Elsewhere'], ['T4', '24:30:00', '9011', 'Lever']]);
+const VIN = tt('vng:1902', 'Vinicepa - CARVALHOS', 41.05397, -8.56032, [['T2', '17:33:00', '9030', 'Sandim (Sá)']]);
+const FROIZ = tt('vng:902', 'Carvalhos (Froiz) ', 41.05695, -8.56731, [['T1', '17:26:00', '9011', 'Lever'], ['T4', '24:46:00', '9011', 'Lever']]);
+
+await test('UNIR answer is JSON inside a JSON string', () => {
+  eq(Core.unirParse(JSON.stringify({ prg: 'vng:1', horarios: [] })).prg, 'vng:1');
+  assert.throws(() => Core.unirParse('{"prg":"x"}'));
+});
+
+await test('UNIR trips: matched by trip_id, with the walk from the drop-off stop to home', () => {
+  const trips = Core.unirTrips({ from: DJ, to: [VIN, FROIZ], target: VIN });
+  eq(trips.map(t => [t.tripId, t.to, t.toName, t.arr - t.dep, t.walk > 0, t.est]),
+    [['T2', 'vng:1902', 'Vinicepa - CARVALHOS', 18, false, false], ['T1', 'vng:902', 'Carvalhos (Froiz)', 16, true, false], ['T4', 'vng:902', 'Carvalhos (Froiz)', 16, true, false]]);
+  assert.ok(Core.walkMinutes(FROIZ, VIN) >= 10 && Core.walkMinutes(FROIZ, VIN) <= 14);
+});
+
+await test('UNIR terminus: arrival estimated from the ride in the other direction, only for trips ending there', () => {
+  const V260 = tt('vng:260', 'Vinicepa - CARVALHOS', 41.05397, -8.56032, [['U1', '06:26:22', '9030', 'D. João II (Metro)'], ['U2', '07:59:06', '9031', 'Bombas Carvalhos']]);
+  const est = Core.unirRides(DJ, VIN);
+  eq(est, { 9030: 18 });
+  const trips = Core.unirTrips({ from: V260, to: [DJ], est });
+  eq(trips.map(t => [t.tripId, Math.round(t.arr * 60), t.est]), [['U1', Math.round((6 * 60 + 26 + 22 / 60 + 18) * 60), true]]);
+});
+
+await test('UNIR next buses: across days, one row per bus, best and beaten marked', () => {
+  const trips = Core.unirTrips({ from: DJ, to: [VIN, FROIZ], target: VIN });
+  const days = [{ date: '2026-10-09', trips }, { date: '2026-10-10', trips }];
+  const now = new Date(2026, 9, 9, 17, 0).getTime();
+  const next = Core.unirNext(days, now, 6);
+  eq(next.map(o => [new Date(o.depAt).getDate(), o.tripId, o.best, o.beaten]),
+    [[9, 'T1', false, true], [9, 'T2', true, false], [10, 'T4', false, false], [10, 'T1', false, true], [10, 'T2', false, false], [11, 'T4', false, false]]);
+  eq(Core.unirNext(days, new Date(2026, 9, 11, 2, 0).getTime(), 6), []);
+});
+
 const fixture = name => JSON.parse(readFileSync(fileURLToPath(new URL(`fixtures/${name}`, import.meta.url)), 'utf8'));
 const liveTest = existsSync(fileURLToPath(new URL('fixtures/', import.meta.url))) ? test : async name => console.log('  skip ' + name + ' (no test/fixtures)');
 

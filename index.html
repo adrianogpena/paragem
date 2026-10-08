@@ -142,6 +142,11 @@ svg{display:block}
 .marker .note{font-size:12px;color:var(--ink-2);padding-left:8px;grid-column:3}
 .set-row{grid-column:2 / 4;padding:0 4px 10px}
 .legend{font-size:12px;color:var(--ink-3);margin-top:10px}
+.lnum{display:inline-block;font-family:var(--mono);font-size:13px;font-weight:600;padding:0 6px;border-radius:5px;background:var(--accent);color:var(--accent-ink);vertical-align:1px}
+.bus .min .at{font-size:22px}
+.bus .min small.day{display:block;margin:4px 0 0;font-size:12px}
+.routes{list-style:none;margin:0;padding:0;font-size:14px;color:var(--ink-2)}
+.routes li{padding:4px 0}
 
 .foot{margin-top:28px;font-size:12px;color:var(--ink-3);line-height:1.5}
 .foot a{color:inherit}
@@ -483,7 +488,89 @@ const Core = (() => {
     return /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : (/^#[0-9a-f]{3}$/i.test(c) ? c.toUpperCase() : null);
   }
 
-  return { lineArrivals, track, locate, locatePassed, parseStopList, normaliseRouteStops, findRoute, normColor };
+  // ---------- UNIR (paragens.amp.pt): timetables only, no live data ----------
+
+  /** The UNIR API sends its JSON inside a JSON string. */
+  function unirParse(j) {
+    if (typeof j === 'string') j = JSON.parse(j);
+    if (!j || !Array.isArray(j.horarios)) throw new Error('The UNIR answer has no "horarios" list. The API may have changed.');
+    return j;
+  }
+
+  /** "HH:MM:SS" to minutes from the start of the service day (can pass 24 h, e.g. "25:00:00"). */
+  const hms = t => { const [h, m, s = 0] = String(t).split(':').map(Number); return h * 60 + m + s / 60; };
+
+  /** Walking minutes between two stops: straight line + 30 %, at 80 m/min. */
+  function walkMinutes(a, b) {
+    if (a?.lat == null || b?.lat == null) return 0;
+    const r = x => x * Math.PI / 180, dLat = r(b.lat - a.lat), dLon = r(b.lon - a.lon);
+    const m = 2 * 6371000 * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLon / 2) ** 2));
+    return Math.ceil(m * 1.3 / 80);
+  }
+
+  /** Median ride in minutes per line, for trips listed at stop `a` and later at stop `b` on the same day. */
+  function unirRides(a, b) {
+    const at = new Map(b.horarios.map(x => [x.trip_id, x])), by = {};
+    for (const x of a.horarios) {
+      const y = at.get(x.trip_id);
+      if (y && hms(y.chegada) > hms(x.chegada)) (by[x.linha] ||= []).push(hms(y.chegada) - hms(x.chegada));
+    }
+    const out = {};
+    for (const [l, v] of Object.entries(by)) { v.sort((p, q) => p - q); out[l] = v[v.length >> 1]; }
+    return out;
+  }
+
+  /**
+   * One service day of one route: each trip listed at `from` and later at one of the `to` stops.
+   * A terminus lists only departures, so a `to` stop with no matching trips gets the trips at `from`
+   * whose destino is that stop, arriving after the ride time in `est` ({ line: minutes }).
+   * `target` (a stop near home or school) adds the walk from the drop-off stop.
+   * Times are minutes from the start of the service day.
+   */
+  function unirTrips({ from, to, est = {}, target = null }) {
+    const out = [];
+    const row = (x, t, arr, isEst) => ({
+      tripId: x.trip_id, line: x.linha, headsign: String(x.destino || '').trim(),
+      from: from.prg, fromName: String(from.designa || '').trim(), to: t.prg, toName: String(t.designa || '').trim(),
+      dep: hms(x.chegada), arr, walk: target && t.prg !== target.prg ? walkMinutes(t, target) : 0, est: isEst,
+    });
+    for (const t of to) {
+      const at = new Map(t.horarios.map(x => [x.trip_id, x]));
+      const before = out.length;
+      for (const x of from.horarios) {
+        const y = at.get(x.trip_id);
+        if (y && hms(y.chegada) > hms(x.chegada)) out.push(row(x, t, hms(y.chegada), false));
+      }
+      if (out.length > before) continue;
+      for (const x of from.horarios) {
+        if (est[x.linha] != null && norm(x.destino) === norm(t.designa)) out.push(row(x, t, hms(x.chegada) + est[x.linha], true));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The next `n` buses after `now` across service days ([{ date: 'YYYY-MM-DD', trips }], local midnight).
+   * One row per bus, with its quickest drop-off. `best` = earliest arrival; `beaten` = a later bus arrives no later.
+   */
+  function unirNext(days, now, n = 6) {
+    const byBus = new Map();
+    for (const { date, trips } of days) {
+      const [y, mo, d] = date.split('-').map(Number), base = new Date(y, mo - 1, d).getTime();
+      for (const t of trips) {
+        const depAt = base + Math.round(t.dep * 60000);
+        if (depAt < now) continue;
+        const o = { ...t, depAt, arrAt: base + Math.round(t.arr * 60000), doneAt: base + Math.round((t.arr + t.walk) * 60000) };
+        const k = `${t.tripId}@${Math.round(depAt / 60000)}`;
+        if (!byBus.has(k) || o.doneAt < byBus.get(k).doneAt) byBus.set(k, o);
+      }
+    }
+    const list = [...byBus.values()].sort((a, b) => a.depAt - b.depAt || a.doneAt - b.doneAt).slice(0, n);
+    const first = Math.min(...list.map(o => o.doneAt));
+    return list.map(o => ({ ...o, best: o.doneAt === first, beaten: list.some(p => p.depAt > o.depAt && p.doneAt <= o.doneAt) }));
+  }
+
+  return { lineArrivals, track, locate, locatePassed, parseStopList, normaliseRouteStops, findRoute, normColor, unirParse, walkMinutes, unirRides, unirTrips, unirNext };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
 </script>
@@ -535,18 +622,42 @@ function defaultState() {
       key: 'l502', short: '502', routeId: null, color: '#F5D24C', example: true, probe: 'BCM1',
       dirs: [{ id: 'paste', name: 'Matosinhos (Mercado)', stops: Core.parseStopList(EXAMPLE_502), myStop: 'BCM1' }],
       activeDir: 0,
-    }],
+    }, ...unirDefaults()],
+    unir: 1,
   };
+}
+
+/**
+ * UNIR trips (timetable only). Each route goes from one stop to any of its `to` stops; `est` gives the stops
+ * to measure the ride on when the `to` stop is a terminus (reverse direction). `target` adds the walk to it.
+ */
+function unirDefaults() {
+  return [
+    { key: 'uWork', kind: 'unir', short: 'Work', name: 'To Work', color: '#2F6FB3', arrive: 'there',
+      routes: [{ from: 'vng:260', to: ['vng:255'], est: ['vng:255', 'vng:1902'] }, { from: 'vng:778', to: ['vng:939'] }] },
+    { key: 'uHome', kind: 'unir', short: 'Home', name: 'To Home', color: '#1F8A4C', arrive: 'home', target: 'vng:1902',
+      routes: [{ from: 'vng:255', to: ['vng:1902', 'vng:902', 'vng:1168'] }] },
+    { key: 'uSchool', kind: 'unir', short: 'School', name: 'To School', color: '#E07B24', arrive: 'school', target: 'vng:506',
+      routes: [{ from: 'vng:255', to: ['vng:506', 'vng:1548', 'vng:793'] }] },
+  ];
 }
 
 // ---------- storage ----------
 const KEY = 'paragem.v1';
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1 && Array.isArray(s.lines)) { s.settings = { ...defaultState().settings, ...s.settings }; return s; } } catch (e) {}
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if (s && s.v === 1 && Array.isArray(s.lines)) {
+      s.settings = { ...defaultState().settings, ...s.settings };
+      if (!s.unir) { s.lines.push(...unirDefaults()); s.unir = 1; }   // added once; a removed trip stays removed
+      return s;
+    }
+  } catch (e) {}
   return defaultState();
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 let state = load();
+save();
 try { const p = new URLSearchParams(location.search).get('api'); if (p) { state.settings.proxy = p.replace(/\/+$/, ''); save(); } } catch (e) {}
 
 // ---------- theme ----------
@@ -646,11 +757,12 @@ const AHEAD = 6;              // stops after mine checked for the last bus that 
 let timer = null, tickTimer = null, nextAt = 0, runId = 0;
 
 const line = () => state.lines.find(l => l.key === state.activeLine) || state.lines[0];
-const dir = () => { const l = line(); return l?.dirs[l.activeDir] || l?.dirs[0]; };
+const dir = () => { const l = line(); return l?.dirs?.[l.activeDir] || l?.dirs?.[0]; };
 const myIdx = () => { const d = dir(); return d ? d.stops.findIndex(s => s.id === d.myStop) : -1; };
 
 async function refresh() {
   clearTimeout(timer);
+  if (line()?.kind === 'unir') return refreshUnir(line());
   const d = dir(), mi = myIdx();
   if (!d || mi < 0) { live = { ...live, busy: false, buses: null, passed: null, err: null }; render(); return; }
   const id = ++runId;
@@ -667,6 +779,64 @@ async function refresh() {
   render();
   schedule();
 }
+// ---------- UNIR trips: timetable only ----------
+const UNIR = 'https://paragens.amp.pt';
+const UNIR_KEY = 'paragem.unir.';
+const unirMem = new Map();
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** One stop's timetable for one day. A day's timetable does not change, so each is fetched once and kept. */
+function unirStop(id, date) {
+  const k = `${UNIR_KEY}${id}@${date}`;
+  if (!unirMem.has(k)) unirMem.set(k, (async () => {
+    try { const c = JSON.parse(localStorage.getItem(k)); if (c) return c; } catch (e) {}
+    const j = Core.unirParse(await getJSON(UNIR, `/acarto2/get_horarios_prg?dia=${date}&id=${encodeURIComponent(id)}`));
+    const slim = { prg: j.prg, designa: j.designa, lat: j.lat, lon: j.lon, horarios: j.horarios.map(({ trip_id, chegada, linha, destino }) => ({ trip_id, chegada, linha, destino })) };
+    try { localStorage.setItem(k, JSON.stringify(slim)); } catch (e) {}
+    return slim;
+  })().catch(e => { unirMem.delete(k); throw e; }));
+  return unirMem.get(k);
+}
+function unirPrune() {
+  const keep = ymd(new Date(Date.now() - 864e5));
+  try { Object.keys(localStorage).filter(k => k.startsWith(UNIR_KEY) && k.split('@')[1] < keep).forEach(k => localStorage.removeItem(k)); } catch (e) {}
+}
+async function unirDay(l, date) {
+  const target = l.target ? await unirStop(l.target, date) : null;
+  const trips = [];
+  for (const r of l.routes) {
+    const [from, ...to] = await Promise.all([r.from, ...r.to].map(id => unirStop(id, date)));
+    const est = r.est ? Core.unirRides(...await Promise.all(r.est.map(id => unirStop(id, date)))) : {};
+    trips.push(...Core.unirTrips({ from, to, est, target }));
+  }
+  return { date, trips };
+}
+/** Yesterday (for its after-midnight trips), today, then the following days until there are `n` buses to show. */
+async function unirUpcoming(l, n = 6) {
+  const now = Date.now(), days = [];
+  for (let k = -1; k < 8; k++) {
+    const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + k);
+    days.push(await unirDay(l, ymd(d)));
+    if (k >= 0 && Core.unirNext(days, now, n).length >= n) break;
+  }
+  return Core.unirNext(days, now, n);
+}
+async function refreshUnir(l) {
+  const id = ++runId;
+  live.busy = true; renderStatus();
+  try {
+    const next = await unirUpcoming(l);
+    if (id !== runId) return;
+    live = { busy: false, unir: next, err: null, at: new Date() };
+  } catch (e) {
+    if (id !== runId) return;
+    live = { ...live, busy: false, err: e instanceof ApiError ? e : new ApiError('parse', e.message || String(e)) };
+  }
+  render();
+  schedule();
+}
+unirPrune();
+
 function schedule() {
   clearTimeout(timer);
   const ms = Math.max(30, state.settings.interval) * 1000;
@@ -708,7 +878,7 @@ function whereText(b, stops) {
 // ---------- render ----------
 function renderTabs() {
   $('#tabs').innerHTML = state.lines.map(l => `
-    <button class="tab" data-key="${esc(l.key)}" aria-current="${l.key === state.activeLine}" aria-label="Line ${esc(l.short)} to ${esc(l.dirs[l.activeDir]?.name || '')}" title="${esc(l.dirs[l.activeDir]?.name || '')}">
+    <button class="tab" data-key="${esc(l.key)}" aria-current="${l.key === state.activeLine}" aria-label="${l.kind === 'unir' ? esc(l.name) : `Line ${esc(l.short)} to ${esc(l.dirs[l.activeDir]?.name || '')}`}" title="${esc(l.kind === 'unir' ? l.name : l.dirs[l.activeDir]?.name || '')}">
       <span class="sw" style="background:${esc(Core.normColor(l.color) || '#F5D24C')};color:${inkFor(l.color)}">${esc(l.short)}</span>
     </button>`).join('') + `<button class="tab add" id="tabAdd">+ Add line</button>`;
   $('#tabs').querySelectorAll('[data-key]').forEach(b => b.onclick = () => {
@@ -736,6 +906,7 @@ function render() {
   applyAccent(l);
   renderTabs();
   const main = $('#main');
+  if (l?.kind === 'unir') return renderUnir(l);
   if (!l) { main.innerHTML = `<div class="panel"><div class="empty">No lines yet. Add one to start.</div></div>`; return; }
   const d = dir(), mi = myIdx(), stops = d.stops;
   const twoDirs = l.dirs.length > 1;
@@ -818,6 +989,58 @@ function render() {
   $('#btnSwap').onclick = () => { if (!twoDirs) return; l.activeDir = (l.activeDir + 1) % l.dirs.length; save(); live = { busy: false }; render(); refresh(); };
   $('#btnLine').onclick = openLine;
   $('#tl').querySelectorAll('.stop-btn').forEach(btn => btn.onclick = () => toggleSetRow(btn.closest('li')));
+  renderStatus();
+}
+
+const hm = ms => new Date(ms).toTimeString().slice(0, 5);
+function dayLabel(ms) {
+  const d = new Date(ms), t = new Date();
+  if (d.toDateString() === t.toDateString()) return '';
+  t.setDate(t.getDate() + 1);
+  return d.toDateString() === t.toDateString() ? 'Tomorrow' : d.toLocaleDateString(undefined, { weekday: 'short' });
+}
+function renderUnir(l) {
+  let body = live.err ? errorBox(live.err) : '';
+  if (live.unir) {
+    if (!live.unir.length) body += `<div class="empty">No buses in the timetable for the next 7 days.</div>`;
+    body += live.unir.map(o => {
+      const m = Math.round((o.depAt - Date.now()) / 60000), day = dayLabel(o.depAt);
+      const when = m < 60 ? `${Math.max(0, m)}<small>min</small>` : `<span class="at">${hm(o.depAt)}</span>`;
+      const ride = Math.round((o.arrAt - o.depAt) / 60000);
+      return `<div class="bus${o.beaten ? ' muted' : ''}">
+        <div class="min">${when}${day ? `<small class="day">${esc(day)}</small>` : ''}</div>
+        <div><div class="where"><span class="lnum">${esc(o.line)}</span> to ${esc(o.toName)}</div>
+          <div class="sub">from ${esc(o.fromName)} ${hm(o.depAt)} · ${o.est ? '≈' : ''}${ride} min ride${o.walk ? ` + ${o.walk} min walk` : ''} · bus to ${esc(o.headsign)}</div></div>
+        <div class="right">${o.best ? '<span class="pill ok">best</span>' : o.beaten ? '<span class="pill">later is faster</span>' : ''}
+          <div class="clock">${esc(l.arrive || 'there')} ${o.est ? '≈' : ''}${hm(o.doneAt)}</div></div>
+      </div>`;
+    }).join('');
+  } else if (!live.err) body += `<div class="empty">Loading timetables…</div>`;
+  const routes = l.routes.map(r => `<li><span class="code">${esc(r.from)}</span> → ${r.to.map(t => `<span class="code">${esc(t)}</span>`).join(' or ')}</li>`).join('');
+  $('#main').innerHTML = `
+    <section class="line-head">
+      <div class="badge" aria-hidden="true">${esc(l.short)}</div>
+      <div class="dir">
+        <div class="lbl">UNIR <span class="tag">Timetable</span></div>
+        <div class="to">${esc(l.name)}</div>
+        <div class="dir-actions"><button class="chip-btn" id="btnUnirRemove">Remove</button></div>
+      </div>
+    </section>
+    <section class="panel" aria-live="polite">
+      <div class="panel-head"><span class="k">Next buses</span><span class="stopname">${l.target ? `Time ${esc(l.arrive)} includes the walk` : 'Arrival at the stop'}</span></div>
+      ${body}
+      <div class="status-row"><span class="upd" id="upd"></span><button data-act="retry" id="btnRefresh">${ICONS.refresh}<span>Refresh</span></button></div>
+    </section>
+    <div class="sec-title"><h2>Routes</h2></div>
+    <ul class="routes">${routes}</ul>
+    <p class="legend">Planned times from paragens.amp.pt; UNIR publishes no live positions or delays. ≈ = arrival estimated from the ride in the other direction (the last stop lists no arrivals). Walks are straight-line distance + 30% at 80 m/min.</p>`;
+  $('#main').querySelectorAll('[data-act="retry"]').forEach(b => b.onclick = () => refresh());
+  $('#main').querySelectorAll('[data-act="settings"]').forEach(b => b.onclick = openSettings);
+  $('#btnUnirRemove').onclick = () => {
+    if (!confirm(`Remove ${l.name}?`)) return;
+    state.lines = state.lines.filter(x => x !== l); state.activeLine = state.lines[0]?.key || null; save();
+    live = { busy: false }; render(); refresh();
+  };
   renderStatus();
 }
 
