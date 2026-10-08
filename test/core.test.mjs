@@ -164,6 +164,27 @@ await test('no bus passed: the forward walk stops after `ahead` stops', async ()
   eq(Core.locatePassed({ obs: r.obs, stops, myIdx: MY }), null);
 });
 
+await test('a busy stop whose list ends before the bus is skipped, not taken as "passed"', async () => {
+  const busy = n => Array.from({ length: n }, (_, i) => arr('200', `200_0_1|99|D1|T${i}|N2`, 1 + (i % 2)));
+  const lists = { BCM1: [arr('502', A, 5)], BVBR2: [arr('502', A, 3)], HML1: busy(8), CVA1: [arr('502', A, 1)], FIG: [] };
+  const fetchStop = async id => ({ arrivals: lists[id] || [] });
+  const r = await Core.track({ fetchStop, stops, myIdx: MY, line: '502', count: 1, maxBack: 30, concurrency: 1 });
+  const [a] = Core.locate({ obs: r.obs, stops, myIdx: MY, count: 1 });
+  eq([a.nextIdx, a.stopsAway, a.etas], [idx('CVA1'), 3, { [idx('CVA1')]: 1, [idx('BVBR2')]: 3, [MY]: 5 }]);
+  lists.HML1 = busy(7);
+  const r2 = await Core.track({ fetchStop, stops, myIdx: MY, line: '502', count: 1, maxBack: 30, concurrency: 1 });
+  eq(Core.locate({ obs: r2.obs, stops, myIdx: MY, count: 1 })[0].nextIdx, idx('BVBR2'));
+});
+
+await test('a bus missing from my cut-off list only counts as passed if it is due before the list ends', async () => {
+  const mine = [arr('502', A, 1), ...Array.from({ length: 7 }, (_, i) => arr('200', `200_0_1|99|D1|T${i}|N2`, 3))];
+  const lists = { BCM1: mine, AGM1: [arr('502', C, 5)], ACRD1: [arr('502', PASSED, 2), arr('502', C, 7)] };
+  const fetchStop = async id => ({ arrivals: lists[id] || [] });
+  const r = await Core.track({ fetchStop, stops, myIdx: MY, line: '502', count: 1, maxBack: 0, ahead: 6, concurrency: 1 });
+  const p = Core.locatePassed({ obs: r.obs, stops, myIdx: MY });
+  eq([p.tripId, p.nextIdx], [PASSED, idx('ACRD1')]);
+});
+
 const fixture = name => JSON.parse(readFileSync(fileURLToPath(new URL(`fixtures/${name}`, import.meta.url)), 'utf8'));
 const liveTest = existsSync(fileURLToPath(new URL('fixtures/', import.meta.url))) ? test : async name => console.log('  skip ' + name + ' (no test/fixtures)');
 

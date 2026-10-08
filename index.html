@@ -256,6 +256,9 @@ hr.sep{border:0;border-top:1px solid var(--rule);margin:18px 0}
   <label class="field"><span>Look back at most</span>
     <div class="seg" role="group" data-name="maxBack"><button type="button" data-v="8">8 stops</button><button type="button" data-v="15">15</button><button type="button" data-v="30">30</button></div>
     <small>How many stops before yours the app may poll to place a bus. Fewer stops, fewer requests.</small></label>
+  <label class="field"><span>Not started if the next stop is over</span>
+    <div class="seg" role="group" data-name="ghost"><button type="button" data-v="5">5 min</button><button type="button" data-v="10">10 min</button><button type="button" data-v="15">15 min</button></div>
+    <small>A bus whose next stop is further away than this is shown as "Not started yet". Lower it if parked buses show as on the way; raise it if real buses show as not started.</small></label>
   <label class="field"><span>Theme</span>
     <div class="seg" role="group" data-name="theme"><button type="button" data-v="auto">System</button><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div></label>
   <hr class="sep">
@@ -282,9 +285,15 @@ const Core = (() => {
   const norm = s => String(s ?? '').trim().toUpperCase();
   const routeOf = a => norm(a.route_short_name ?? a.route_long_name ?? a.route_id);
 
-  /** Arrivals at one stop for one line, keyed by trip_id (smallest non-negative minutes per trip). */
+  /**
+   * Arrivals at one stop for one line, keyed by trip_id (smallest non-negative minutes per trip).
+   * The map also carries `listed` (rows at the stop, all lines) and `horizon` (latest minutes listed),
+   * so `maybeCut` can tell whether a missing trip may only have been cut off a long list.
+   */
   function lineArrivals(arrivals, line) {
     const L = norm(line), byTrip = new Map();
+    byTrip.listed = (arrivals || []).length;
+    byTrip.horizon = Math.max(-1, ...(arrivals || []).map(a => Number(a.arrival_minutes)).filter(Number.isFinite));
     for (const a of arrivals || []) {
       if (routeOf(a) !== L) continue;
       const m = Number(a.arrival_minutes);
@@ -295,6 +304,13 @@ const Core = (() => {
     }
     return byTrip;
   }
+
+  /**
+   * True if a trip due at `minutes` may be missing from this stop's list only because the list was cut off:
+   * the list is long (busy stop) and ends before `minutes`. Absence from such a list does not mean "passed".
+   */
+  const LIST_FULL = 8;
+  const maybeCut = (m, minutes) => !!m && m.listed >= LIST_FULL && minutes > m.horizon;
 
   /**
    * Poll my stop, then walk backwards toward the start of the line, `concurrency` stops at a time,
@@ -309,6 +325,7 @@ const Core = (() => {
     obs.set(myIdx, lineArrivals(mine.arrivals, line));
     const followed = [...obs.get(myIdx).values()].sort((a, b) => a._m - b._m).slice(0, count).map(a => a.trip_id || null);
     const open = new Set(followed.filter(Boolean));
+    const lastMin = new Map([...obs.get(myIdx).values()].map(a => [a.trip_id, a._m]));
     const floor = Math.max(0, myIdx - maxBack);
     let k = myIdx - 1;
     while (k >= floor && open.size) {
@@ -322,7 +339,10 @@ const Core = (() => {
         if (res[j].status === 'rejected') { errors.push({ idx: i, error: res[j].reason }); broken = true; break; }
         const m = lineArrivals(res[j].value.arrivals, line);
         obs.set(i, m);
-        for (const t of [...open]) if (!m.has(t)) open.delete(t);
+        for (const t of [...open]) {
+          if (m.has(t)) lastMin.set(t, m.get(t)._m);
+          else if (!maybeCut(m, lastMin.get(t))) open.delete(t);
+        }
         if (!open.size) break;
       }
       if (broken) break;
@@ -343,7 +363,7 @@ const Core = (() => {
         if (res[j].status === 'rejected') { broken = true; break; }
         const m = lineArrivals(res[j].value.arrivals, line);
         obs.set(batch[j], m);
-        if ([...m.values()].some(a => a.trip_id && !atMine.has(a.trip_id) && a._m <= ghostMinutes)) { found = true; break; }
+        if ([...m.values()].some(a => isPassed(a, atMine, ghostMinutes))) { found = true; break; }
       }
       if (broken) break;
       f += batch.length;
@@ -367,7 +387,10 @@ const Core = (() => {
       let i = myIdx;
       while (i >= 0 && obs.has(i)) {
         const x = obs.get(i).get(t || `__none__`) ?? (i === myIdx ? a : null);
-        if (!x) break;
+        if (!x) {
+          if (t && maybeCut(obs.get(i), seen.at(-1)[1]._m)) { i--; continue; }   // cut off a busy stop's list: look further back
+          break;
+        }
         seen.push([i, x]);
         if (!t) break;                       // without a trip_id we cannot follow it across stops
         i--;
@@ -394,6 +417,12 @@ const Core = (() => {
   }
 
   /**
+   * A trip listed after my stop has passed it if my stop no longer lists it. If my list may be cut off before
+   * the trip's minutes, a bus not yet at my stop could be missing too (it is due there sooner), so that does not count.
+   */
+  const isPassed = (a, atMine, ghostMinutes) => !!a.trip_id && !atMine.has(a.trip_id) && a._m <= ghostMinutes && !maybeCut(atMine, a._m);
+
+  /**
    * The last bus that passed my stop: the first stop after mine (in the polled run) that lists a trip
    * my stop no longer lists. If several, the one furthest from that stop, i.e. closest behind it.
    */
@@ -401,7 +430,7 @@ const Core = (() => {
     const atMine = obs.get(myIdx);
     if (!atMine) return null;
     for (let i = myIdx + 1; obs.has(i); i++) {
-      const hit = [...obs.get(i).values()].filter(a => a.trip_id && !atMine.has(a.trip_id) && a._m <= ghostMinutes).sort((a, b) => b._m - a._m)[0];
+      const hit = [...obs.get(i).values()].filter(a => isPassed(a, atMine, ghostMinutes)).sort((a, b) => b._m - a._m)[0];
       if (hit) return {
         tripId: hit.trip_id, headsign: hit.trip_headsign || '', nextIdx: i, nextName: stops[i]?.name ?? '', nextMinutes: hit._m,
         stopsPast: i - myIdx, delay: hit.delay_minutes ?? null, status: hit.status ?? null,
@@ -500,7 +529,7 @@ MATM6 Matosinhos Mercado`;
 function defaultState() {
   return {
     v: 1,
-    settings: { count: 2, interval: 30, maxBack: 15, theme: 'auto', proxy: '' },
+    settings: { count: 2, interval: 30, maxBack: 15, ghost: 10, theme: 'auto', proxy: '' },
     activeLine: 'l502',
     lines: [{
       key: 'l502', short: '502', routeId: null, color: '#F5D24C', example: true, probe: 'BCM1',
@@ -513,7 +542,7 @@ function defaultState() {
 // ---------- storage ----------
 const KEY = 'paragem.v1';
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1 && Array.isArray(s.lines)) return s; } catch (e) {}
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1 && Array.isArray(s.lines)) { s.settings = { ...defaultState().settings, ...s.settings }; return s; } } catch (e) {}
   return defaultState();
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
@@ -627,9 +656,10 @@ async function refresh() {
   const id = ++runId;
   live.busy = true; renderStatus();
   try {
-    const r = await Core.track({ fetchStop, stops: d.stops, myIdx: mi, line: line().short, count: state.settings.count, maxBack: state.settings.maxBack, concurrency: 3, ahead: AHEAD });
+    const { count, maxBack, ghost: ghostMinutes } = state.settings;
+    const r = await Core.track({ fetchStop, stops: d.stops, myIdx: mi, line: line().short, count, maxBack, concurrency: 3, ahead: AHEAD, ghostMinutes });
     if (id !== runId) return;
-    live = { busy: false, obs: r.obs, buses: Core.locate({ obs: r.obs, stops: d.stops, myIdx: mi, count: state.settings.count }), passed: Core.locatePassed({ obs: r.obs, stops: d.stops, myIdx: mi }), err: null, at: new Date(), requests: r.requests, partial: r.errors[0] || null, meta: r.meta };
+    live = { busy: false, obs: r.obs, buses: Core.locate({ obs: r.obs, stops: d.stops, myIdx: mi, count, ghostMinutes }), passed: Core.locatePassed({ obs: r.obs, stops: d.stops, myIdx: mi, ghostMinutes }), err: null, at: new Date(), requests: r.requests, partial: r.errors[0] || null, meta: r.meta };
   } catch (e) {
     if (id !== runId) return;
     live = { ...live, busy: false, err: e instanceof ApiError ? e : new ApiError('parse', e.message || String(e)) };

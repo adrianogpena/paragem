@@ -74,7 +74,7 @@ It then opens full screen like an app. With option A, the app shell is cached, s
 - **Add a line:** + Add line.
   - *From STCP:* enter the line number and the code of any stop on it (e.g. `502` + `BCM1`). The app finds the internal `route_id` through `/api/stops/BCM1/routes` and then loads both directions. If you already know the route_id, you can enter it directly. stcp.pt/pt/linhas no longer puts route_ids in its HTML; to find one, open the line page with your browser's developer tools on the Network tab and look for a request to `/api/route/ID/stops`.
   - *Paste stops:* one stop per line, in order. `CODE Name`, `Name CODE`, `Name (CODE)` and the comma-separated format from your brief all work. A preview shows what was recognised.
-- **Settings:** buses to follow (1–3), refresh interval (30 s minimum), how many stops back the app may poll, theme, API address, and copy/paste of your whole setup to move it to another device.
+- **Settings:** buses to follow (1–3), refresh interval (30 s minimum), how many stops back the app may poll, when a bus counts as not started (5, 10 or 15 min to its next stop), theme, API address, and copy/paste of your whole setup to move it to another device.
 
 ## How a bus is located
 
@@ -95,4 +95,4 @@ Polling pauses while the app is hidden and resumes when you return. Any failure 
 
 ## Etiquette and caveats
 
-This is for personal use. It sends one request per stop per refresh, every 30 s or slower, and only for the stops it needs. It doesn't store or redistribute STCP data. The API is unofficial and undocumented, so field names can change; when the app gets something unexpected, it says so instead of showing wrong buses. If busy stops cap how many arrivals they list, a bus could look closer than it is; the 10-minute rule catches the worst cases.
+This is for personal use. It sends one request per stop per refresh, every 30 s or slower, and only for the stops it needs. It doesn't store or redistribute STCP data. The API is unofficial and undocumented, so field names can change; when the app gets something unexpected, it says so instead of showing wrong buses. If a busy stop caps how many arrivals it lists, a bus missing from that list may just be cut off. When a list has 8 or more rows and ends before the time the bus would be due, the app does not take the missing bus as passed: it looks one stop further back, and the passed-bus marker ignores it.
