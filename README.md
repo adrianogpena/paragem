@@ -28,6 +28,8 @@ Phones won't run a downloaded HTML file properly, so the app needs to be served 
 
 **A. GitHub Pages + Cloudflare Worker (free, works anywhere, recommended)**
 
+This is already set up: the app is at https://adrianogpena.github.io/paragem/, and on github.io it uses the Worker at https://paragem-proxy.adrianogpena.workers.dev without any configuration (`PAGES_PROXY` in index.html). The steps below are for setting it up again from scratch.
+
 1. Create a public GitHub repository, e.g. `paragem`, and upload every file in this folder (the `proxy/` and `test/` folders are optional).
 2. Repository → Settings → Pages → Source: *Deploy from a branch* → `main` / root → Save. After a minute the app is at `https://YOURNAME.github.io/paragem/`.
 3. If arrivals load there, you're done. If you get the CORS box, deploy the Worker (section 3) and open
