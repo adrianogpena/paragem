@@ -855,7 +855,7 @@ $('#btnLineRefresh').onclick = async () => {
     const mine = new Map(l.dirs.map(d => [d.myStop, true]));
     r.dirs.forEach(d => { const hit = d.stops.find(s => mine.has(s.id)); if (hit) d.myStop = hit.id; });
     const keep = r.dirs.findIndex(d => d.myStop);
-    Object.assign(l, { routeId: r.rid, dirs: r.dirs, example: false, color: r.color || l.color, probe: f.probe.value.trim().toUpperCase() || l.probe, activeDir: Math.max(0, keep) });
+    Object.assign(l, { routeId: r.rid, dirs: r.dirs, example: false, color: l.color || r.color, probe: f.probe.value.trim().toUpperCase() || l.probe, activeDir: Math.max(0, keep) });
     save(); msg.className = 'msg good'; msg.textContent = `Loaded ${r.dirs.length} direction(s), route_id ${r.rid}.`;
     live = { busy: false }; render(); refresh();
   } catch (e) { msg.className = 'msg bad'; msg.textContent = explain(e); }
