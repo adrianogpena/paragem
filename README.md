@@ -94,7 +94,7 @@ Polling pauses while the app is hidden and resumes when you return. Any failure 
 The **Work**, **Home** and **School** tabs use UNIR (Área Metropolitana do Porto) buses. UNIR publishes planned times only, no positions or delays, so these tabs show the timetable from `paragens.amp.pt/acarto2/get_horarios_prg`. That API allows browser calls, so no proxy is needed.
 
 - A trip is one or more routes, each from one stop to any of several stops. Every bus listed at the start stop and later at one of the end stops counts. The tab shows the next 6 buses by departure, from today or the following days.
-- **Home** and **School** add the walk from the drop-off stop to `target` (home is vng:1902, school vng:506): straight line + 30 %, at 80 m/min. **best** is the earliest arrival; **later is faster** marks a bus that a later one beats.
+- **Home** and **School** add the walk from the drop-off stop to `target` (home is vng:1902, school vng:506; School also drops off at vng:1239 and vng:793): straight line + 30 %, at 80 m/min. **best** is the earliest arrival; **later is faster** marks a bus that a later one beats.
 - The last stop of a line lists no arrivals. For Vinicepa → D. João II (vng:260 → vng:255) the arrival is estimated from the ride in the other direction (vng:255 → vng:1902) and marked ≈.
 - Each stop's timetable is fetched once per day and kept in `localStorage`. The trips are defined in `unirDefaults()` in `index.html`.
 

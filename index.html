@@ -623,7 +623,7 @@ function defaultState() {
       dirs: [{ id: 'paste', name: 'Matosinhos (Mercado)', stops: Core.parseStopList(EXAMPLE_502), myStop: 'BCM1' }],
       activeDir: 0,
     }, ...unirDefaults()],
-    unir: 1,
+    unir: 2,
   };
 }
 
@@ -638,7 +638,7 @@ function unirDefaults() {
     { key: 'uHome', kind: 'unir', short: 'Home', name: 'To Home', color: '#1F8A4C', arrive: 'home', target: 'vng:1902',
       routes: [{ from: 'vng:255', to: ['vng:1902', 'vng:902', 'vng:1168'] }] },
     { key: 'uSchool', kind: 'unir', short: 'School', name: 'To School', color: '#E07B24', arrive: 'school', target: 'vng:506',
-      routes: [{ from: 'vng:255', to: ['vng:506', 'vng:1548', 'vng:793'] }] },
+      routes: [{ from: 'vng:255', to: ['vng:506', 'vng:1239', 'vng:793'] }] },
   ];
 }
 
@@ -649,7 +649,8 @@ function load() {
     const s = JSON.parse(localStorage.getItem(KEY));
     if (s && s.v === 1 && Array.isArray(s.lines)) {
       s.settings = { ...defaultState().settings, ...s.settings };
-      if (!s.unir) { s.lines.push(...unirDefaults()); s.unir = 1; }   // added once; a removed trip stays removed
+      if (!s.unir) { s.lines.push(...unirDefaults()); s.unir = 2; }   // added once; a removed trip stays removed
+      if (s.unir < 2) { const sc = s.lines.find(l => l.key === 'uSchool'); if (sc) sc.routes = unirDefaults().find(l => l.key === 'uSchool').routes; s.unir = 2; }   // School: vng:1239 instead of vng:1548
       return s;
     }
   } catch (e) {}
