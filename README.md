@@ -79,9 +79,10 @@ It then opens full screen like an app. With option A, the app shell is cached, s
 ## How a bus is located
 
 1. Fetch `/realtime` for **your stop**. Keep only arrivals for this line (`route_short_name`), drop negative minutes (buses that already passed), merge duplicate rows per `trip_id`, and take the soonest 1–3. Those are the buses being followed.
-2. Walk **backwards** from your stop toward the start of the line, 3 stops at a time. A bus that has already passed a stop isn't listed there, so the first stop that doesn't list a trip is behind the bus. The walk stops as soon as every followed bus has been placed. With 1 bus followed that's usually 2–5 requests per refresh, never more than *Look back at most* + 1. Stops after yours are never polled.
-3. A bus's **next stop** is the stop with its smallest `arrival_minutes` ≥ 0 among the consecutive stops that list it. The marker is drawn on the rail just above that stop.
-4. States:
+2. Walk **backwards** from your stop toward the start of the line, 3 stops at a time. A bus that has already passed a stop isn't listed there, so the first stop that doesn't list a trip is behind the bus. The walk stops as soon as every followed bus has been placed. With 1 bus followed that's usually 2–5 requests per refresh, never more than *Look back at most* + 1.
+3. Then walk **forward** from your stop, 3 stops at a time and at most 6 stops, until a stop lists a trip your stop no longer lists. That's the last bus that passed, shown as a grey *Passed* marker. This adds 3 requests per refresh, or 6 when no bus passed recently.
+4. A bus's **next stop** is the stop with its smallest `arrival_minutes` ≥ 0 among the consecutive stops that list it. The marker is drawn on the rail just above that stop.
+5. States:
    - **At the first stop:** the first stop still lists the trip, so the bus hasn't left yet.
    - **Not started yet:** the bus's next stop is more than 10 minutes away. A real bus is never that far from the next stop, so this is a timetable entry with no bus behind it yet. This is how your "only listed at the last stops = not started" rule is generalised.
    - **N+ stops away:** the bus is beyond the look-back limit.

@@ -45,6 +45,8 @@ const rt = {
   BVBR2: [arr('502', A, 3, { delay: 3, status: 'delayed' }), arr('502', B, 22), arr('502', C, 46)],
   BCM1:  [arr('502', A, 5, { delay: 3, status: 'delayed' }), arr('502', PASSED, -1), arr('502', B, 25),
           arr('502', B, 26), /* duplicate row for B, larger: ignored */ arr('502', C, 48), arr('200', '200_0_1|99|D1|T3|N2', 2)],
+  AGM1:  [arr('502', PASSED, 1), arr('502', A, 7), arr('502', B, 27)],
+  ACRD1: [arr('502', PASSED, 3), arr('502', A, 9)],
 };
 const response = code => ({ stop_id: code, stop_name: stops[idx(code)]?.name, arrivals: rt[code] || [], last_updated: '2026-10-08T21:10:00', data_source: 'realtime' });
 
@@ -140,6 +142,26 @@ await test('route lookup and stop-list normalising', () => {
   eq(r, { routeId: '81', color: '#F5D24C', name: '' });
   const s = Core.normaliseRouteStops({ stops: [{ stop_id: 'AGM1', stop_code: 'AGM1', stop_name: 'Agramonte', stop_sequence: 2, stop_lat: 41.1, stop_lon: -8.6 }, { stop_id: 'BCM1', stop_code: 'BCM1', stop_name: 'Casa da Música', stop_sequence: 1 }] });
   eq(s.map(x => x.id), ['BCM1', 'AGM1']);
+});
+
+await test('the last bus that passed is found one stop after mine', async () => {
+  const base = await Core.track({ fetchStop: mockFetch(), stops, myIdx: MY, line: '502', count: 1 });
+  const f = mockFetch();
+  const r = await Core.track({ fetchStop: f, stops, myIdx: MY, line: '502', count: 1, ahead: 6 });
+  eq(f.calls.slice(base.requests), ['AGM1', 'ACRD1', 'BSS1']);
+  eq(r.requests, base.requests + 3);
+  const p = Core.locatePassed({ obs: r.obs, stops, myIdx: MY });
+  eq([p.tripId, p.nextIdx, p.stopsPast, p.nextMinutes], [PASSED, idx('AGM1'), 1, 1]);
+  eq(Core.locate({ obs: r.obs, stops, myIdx: MY, count: 1 })[0].tripId, A);
+});
+
+await test('no bus passed: the forward walk stops after `ahead` stops', async () => {
+  const calls = [];
+  const fetchStop = async id => { calls.push(id); return id === 'BCM1' ? response('BCM1') : { arrivals: [arr('502', C, 40)] }; };
+  const r = await Core.track({ fetchStop, stops, myIdx: MY, line: '502', count: 1, ahead: 6 });
+  eq(calls.slice(-6), stops.slice(MY + 1, MY + 7).map(s => s.id));
+  eq(r.requests, 1 + 3 + 6);
+  eq(Core.locatePassed({ obs: r.obs, stops, myIdx: MY }), null);
 });
 
 const fixture = name => JSON.parse(readFileSync(fileURLToPath(new URL(`fixtures/${name}`, import.meta.url)), 'utf8'));

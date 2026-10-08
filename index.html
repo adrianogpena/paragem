@@ -64,7 +64,7 @@ svg{display:block}
 /* line tabs */
 .tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex:none;display:flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 6px;border-radius:9px;border:1px solid var(--rule);background:var(--surface);font-weight:600}
+.tab{flex:none;display:flex;align-items:center;gap:8px;height:36px;padding:0 5px;border-radius:9px;border:1px solid var(--rule);background:var(--surface);font-weight:600}
 .tab .sw{min-width:30px;height:24px;padding:0 5px;border-radius:5px;display:grid;place-items:center;font-family:var(--mono);font-size:13px;font-weight:600}
 .tab[aria-current="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 .tab.add{padding:0 12px;color:var(--ink-2);font-weight:500}
@@ -138,6 +138,7 @@ svg{display:block}
 .vehicle{display:inline-flex;align-items:center;gap:8px;margin-left:-26px;position:relative;z-index:1;background:var(--accent);color:var(--accent-ink);border:2px solid var(--ink);border-radius:9px;padding:4px 10px 4px 7px;font-weight:700;font-size:13px;white-space:nowrap}
 .vehicle svg{width:18px;height:18px}
 .vehicle .num{font-weight:600}
+.vehicle.passed{background:var(--surface);color:var(--ink-2);border-color:var(--ink-3)}
 .marker .note{font-size:12px;color:var(--ink-2);padding-left:8px;grid-column:3}
 .set-row{grid-column:2 / 4;padding:0 4px 10px}
 .legend{font-size:12px;color:var(--ink-3);margin-top:10px}
@@ -300,7 +301,7 @@ const Core = (() => {
    * until every followed bus has dropped out of a stop's list (that is where it currently is),
    * or `maxBack` stops have been checked. Returns raw observations: Map(stopIndex -> Map(trip_id -> arrival)).
    */
-  async function track({ fetchStop, stops, myIdx, line, count = 2, maxBack = 15, concurrency = 3 }) {
+  async function track({ fetchStop, stops, myIdx, line, count = 2, maxBack = 15, concurrency = 3, ahead = 0, ghostMinutes = 10 }) {
     const obs = new Map();
     const errors = [];
     let requests = 1;
@@ -326,6 +327,26 @@ const Core = (() => {
       }
       if (broken) break;
       k -= batch.length;
+    }
+    // Then walk forward up to `ahead` stops, until a stop lists a trip that my stop no longer lists:
+    // that is the last bus that passed. A failure here only means it is not shown.
+    const atMine = obs.get(myIdx);
+    const last = Math.min(stops.length - 1, myIdx + ahead);
+    let f = myIdx + 1, found = false;
+    while (f <= last && !found) {
+      const batch = [];
+      for (let i = f; i <= last && batch.length < concurrency; i++) batch.push(i);
+      const res = await Promise.allSettled(batch.map(i => fetchStop(stops[i].id)));
+      requests += batch.length;
+      let broken = false;
+      for (let j = 0; j < batch.length; j++) {
+        if (res[j].status === 'rejected') { broken = true; break; }
+        const m = lineArrivals(res[j].value.arrivals, line);
+        obs.set(batch[j], m);
+        if ([...m.values()].some(a => a.trip_id && !atMine.has(a.trip_id) && a._m <= ghostMinutes)) { found = true; break; }
+      }
+      if (broken) break;
+      f += batch.length;
     }
     return { obs, errors, requests, meta: { stop_name: mine.stop_name, last_updated: mine.last_updated, data_source: mine.data_source } };
   }
@@ -372,6 +393,23 @@ const Core = (() => {
     });
   }
 
+  /**
+   * The last bus that passed my stop: the first stop after mine (in the polled run) that lists a trip
+   * my stop no longer lists. If several, the one furthest from that stop, i.e. closest behind it.
+   */
+  function locatePassed({ obs, stops, myIdx, ghostMinutes = 10 }) {
+    const atMine = obs.get(myIdx);
+    if (!atMine) return null;
+    for (let i = myIdx + 1; obs.has(i); i++) {
+      const hit = [...obs.get(i).values()].filter(a => a.trip_id && !atMine.has(a.trip_id) && a._m <= ghostMinutes).sort((a, b) => b._m - a._m)[0];
+      if (hit) return {
+        tripId: hit.trip_id, headsign: hit.trip_headsign || '', nextIdx: i, nextName: stops[i]?.name ?? '', nextMinutes: hit._m,
+        stopsPast: i - myIdx, delay: hit.delay_minutes ?? null, status: hit.status ?? null,
+      };
+    }
+    return null;
+  }
+
   /** Parse a pasted stop list. Returns [{id, code, name}]. */
   function parseStopList(text) {
     const isCode = s => /^[A-Z][A-Z0-9]{1,7}$/.test(s) && (/\d/.test(s) || s.length <= 4);
@@ -416,7 +454,7 @@ const Core = (() => {
     return /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : (/^#[0-9a-f]{3}$/i.test(c) ? c.toUpperCase() : null);
   }
 
-  return { lineArrivals, track, locate, parseStopList, normaliseRouteStops, findRoute, normColor };
+  return { lineArrivals, track, locate, locatePassed, parseStopList, normaliseRouteStops, findRoute, normColor };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
 </script>
@@ -574,7 +612,8 @@ async function fetchStop(id) {
 }
 
 // ---------- live state ----------
-let live = { busy: false, buses: null, obs: null, err: null, at: null, requests: 0, partial: null, meta: null };
+let live = { busy: false, buses: null, passed: null, obs: null, err: null, at: null, requests: 0, partial: null, meta: null };
+const AHEAD = 6;              // stops after mine checked for the last bus that passed
 let timer = null, tickTimer = null, nextAt = 0, runId = 0;
 
 const line = () => state.lines.find(l => l.key === state.activeLine) || state.lines[0];
@@ -584,13 +623,13 @@ const myIdx = () => { const d = dir(); return d ? d.stops.findIndex(s => s.id ==
 async function refresh() {
   clearTimeout(timer);
   const d = dir(), mi = myIdx();
-  if (!d || mi < 0) { live = { ...live, busy: false, buses: null, err: null }; render(); return; }
+  if (!d || mi < 0) { live = { ...live, busy: false, buses: null, passed: null, err: null }; render(); return; }
   const id = ++runId;
   live.busy = true; renderStatus();
   try {
-    const r = await Core.track({ fetchStop, stops: d.stops, myIdx: mi, line: line().short, count: state.settings.count, maxBack: state.settings.maxBack, concurrency: 3 });
+    const r = await Core.track({ fetchStop, stops: d.stops, myIdx: mi, line: line().short, count: state.settings.count, maxBack: state.settings.maxBack, concurrency: 3, ahead: AHEAD });
     if (id !== runId) return;
-    live = { busy: false, obs: r.obs, buses: Core.locate({ obs: r.obs, stops: d.stops, myIdx: mi, count: state.settings.count }), err: null, at: new Date(), requests: r.requests, partial: r.errors[0] || null, meta: r.meta };
+    live = { busy: false, obs: r.obs, buses: Core.locate({ obs: r.obs, stops: d.stops, myIdx: mi, count: state.settings.count }), passed: Core.locatePassed({ obs: r.obs, stops: d.stops, myIdx: mi }), err: null, at: new Date(), requests: r.requests, partial: r.errors[0] || null, meta: r.meta };
   } catch (e) {
     if (id !== runId) return;
     live = { ...live, busy: false, err: e instanceof ApiError ? e : new ApiError('parse', e.message || String(e)) };
@@ -639,8 +678,8 @@ function whereText(b, stops) {
 // ---------- render ----------
 function renderTabs() {
   $('#tabs').innerHTML = state.lines.map(l => `
-    <button class="tab" data-key="${esc(l.key)}" aria-current="${l.key === state.activeLine}">
-      <span class="sw" style="background:${esc(Core.normColor(l.color) || '#F5D24C')};color:${inkFor(l.color)}">${esc(l.short)}</span>${esc(l.dirs[l.activeDir]?.name || '')}
+    <button class="tab" data-key="${esc(l.key)}" aria-current="${l.key === state.activeLine}" aria-label="Line ${esc(l.short)} to ${esc(l.dirs[l.activeDir]?.name || '')}" title="${esc(l.dirs[l.activeDir]?.name || '')}">
+      <span class="sw" style="background:${esc(Core.normColor(l.color) || '#F5D24C')};color:${inkFor(l.color)}">${esc(l.short)}</span>
     </button>`).join('') + `<button class="tab add" id="tabAdd">+ Add line</button>`;
   $('#tabs').querySelectorAll('[data-key]').forEach(b => b.onclick = () => {
     if (state.activeLine === b.dataset.key) return;
@@ -690,6 +729,12 @@ function render() {
           <div class="right">${muted ? '<span class="pill">scheduled</span>' : delayPill(b)}<div class="clock">${clockOf(b)}</div></div>
         </div>`;
       }).join('');
+      const p = live.passed;
+      if (p) body += `<div class="bus muted">
+          <div class="min">+${p.stopsPast}<small>${p.stopsPast === 1 ? 'stop' : 'stops'}</small></div>
+          <div><div class="where">Already passed</div><div class="sub">${p.nextMinutes > 0 ? `reaches ${esc(p.nextName)} in ${p.nextMinutes} min` : `at ${esc(p.nextName)} now`}${p.headsign ? ` · to ${esc(p.headsign)}` : ''}</div></div>
+          <div class="right">${delayPill(p)}</div>
+        </div>`;
       if (live.partial) body += `<div class="empty" style="font-size:13px">Could not check ${esc(stops[live.partial.idx].name)}; positions before it are uncertain.</div>`;
     } else if (!live.err) body += `<div class="empty">Loading arrivals…</div>`;
     const ds = live.meta?.data_source && !/real/i.test(live.meta.data_source) ? ` · ${esc(live.meta.data_source)}` : '';
@@ -710,6 +755,8 @@ function render() {
       const label = b.state === 'terminus' ? 'at first stop' : b.state === 'far' ? `${b.stopsAway}+ stops` : b.state === 'arriving' ? 'arriving' : `${b.stopsAway} ${b.stopsAway === 1 ? 'stop' : 'stops'}`;
       rows += `<li class="marker"><div class="rail"></div><div><span class="vehicle" title="Bus ${n + 1}">${ICONS.bus}<span>${n === 0 ? 'Next' : n === 1 ? '2nd' : '3rd'}</span><span class="num">${b.minutes} min</span></span></div><div class="note">${label}</div></li>`;
     }
+    const p = live.passed;
+    if (p && p.nextIdx === i) rows += `<li class="marker"><div class="rail"></div><div><span class="vehicle passed" title="Last bus that passed your stop">${ICONS.bus}<span>Passed</span></span></div><div class="note">${p.stopsPast} ${p.stopsPast === 1 ? 'stop' : 'stops'} past</div></li>`;
     const beyond = mi >= 0 && i > mi;
     const eta = mi >= 0 && i <= mi && firstEtas[i] !== undefined ? `${firstEtas[i]}′` : '';
     rows += `<li class="stop${i === mi ? ' mine' : ''}${beyond ? ' beyond' : ''}${i === stops.length - 1 ? ' last' : ''}" data-i="${i}">
