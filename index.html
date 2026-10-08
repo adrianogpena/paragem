@@ -1,0 +1,924 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Paragem</title>
+<meta name="description" content="Follow a Porto STCP bus line and see what is coming to your stop.">
+<meta name="theme-color" content="#F3F1EA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1012" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Paragem">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F3F1EA; --surface:#FBFAF6; --surface-2:#ECE9E0;
+  --ink:#15171A; --ink-2:#555A61; --ink-3:#8A8E95; --rule:#D9D5C9;
+  --danger:#A3261C; --danger-bg:#F6E3DF; --ok:#1F6B3A;
+  --accent:#F5D24C; --accent-ink:#15171A;
+  --display:"Archivo", "Arial Narrow", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r:12px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1012; --surface:#17191C; --surface-2:#1F2226;
+    --ink:#ECEAE3; --ink-2:#A7AAAF; --ink-3:#6C7076; --rule:#2B2E33;
+    --danger:#F08A7E; --danger-bg:#2E1815; --ok:#7BC795;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1012; --surface:#17191C; --surface-2:#1F2226;
+  --ink:#ECEAE3; --ink-2:#A7AAAF; --ink-3:#6C7076; --rule:#2B2E33;
+  --danger:#F08A7E; --danger-bg:#2E1815; --ok:#7BC795;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:var(--display);font-size:16px;line-height:1.4;-webkit-font-smoothing:antialiased;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.wrap{max-width:560px;margin:0 auto;padding:0 16px 48px}
+.num,.code,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+svg{display:block}
+
+/* top bar */
+.top{display:flex;align-items:center;gap:8px;padding:14px 0 10px}
+.brand{font-weight:800;font-stretch:75%;font-size:20px;letter-spacing:.01em;margin-right:auto;text-transform:uppercase}
+.brand b{display:inline-block;width:10px;height:10px;background:var(--accent);border:1.5px solid var(--ink);border-radius:50%;margin-right:7px;vertical-align:1px}
+.icon-btn{width:40px;height:40px;border-radius:10px;border:1px solid var(--rule);background:var(--surface);display:grid;place-items:center}
+.icon-btn:active{transform:scale(.97)}
+.icon-btn svg{width:20px;height:20px}
+
+/* line tabs */
+.tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;display:flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 6px;border-radius:9px;border:1px solid var(--rule);background:var(--surface);font-weight:600}
+.tab .sw{min-width:30px;height:24px;padding:0 5px;border-radius:5px;display:grid;place-items:center;font-family:var(--mono);font-size:13px;font-weight:600}
+.tab[aria-current="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.tab.add{padding:0 12px;color:var(--ink-2);font-weight:500}
+
+/* line header */
+.line-head{display:flex;align-items:flex-start;gap:14px;padding:6px 0 14px}
+.badge{flex:none;min-width:64px;height:56px;padding:0 10px;border-radius:10px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;font-stretch:80%;font-size:30px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.dir{flex:1;min-width:0}
+.dir .lbl{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.dir .to{font-size:22px;font-weight:700;font-stretch:85%;line-height:1.15;margin-top:2px}
+.dir-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.chip-btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--rule);background:var(--surface);font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.chip-btn svg{width:16px;height:16px}
+.chip-btn[disabled]{opacity:.45;cursor:not-allowed}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:5px;border:1px solid var(--rule);color:var(--ink-2);vertical-align:2px}
+
+/* my stop panel */
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);overflow:hidden}
+.panel-head{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;padding:12px 16px 10px;border-bottom:1px solid var(--rule)}
+.panel-head .k{flex-basis:100%;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700}
+.panel-head .stopname{flex:1;font-weight:700;font-size:18px;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bus{display:grid;grid-template-columns:72px 1fr auto;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--rule)}
+.bus:first-of-type{border-top:0}
+.bus .min{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:34px;line-height:1;letter-spacing:-.03em}
+.bus .min small{font-size:13px;font-weight:500;letter-spacing:0;margin-left:2px;color:var(--ink-2)}
+.bus .where{font-size:15px;font-weight:600;line-height:1.25}
+.bus .sub{font-size:13px;color:var(--ink-2);margin-top:2px}
+.bus .right{text-align:right}
+.bus .clock{font-family:var(--mono);font-size:13px;color:var(--ink-2);margin-top:4px}
+.bus.muted .min{color:var(--ink-3)}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--rule);white-space:nowrap;font-variant-numeric:tabular-nums}
+.pill.late{border-color:var(--danger);color:var(--danger)}
+.pill.ok{border-color:var(--ok);color:var(--ok)}
+.empty{padding:16px;color:var(--ink-2);font-size:15px}
+.status-row{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--rule);background:var(--surface-2);font-size:13px;color:var(--ink-2)}
+.status-row .upd{margin-right:auto}
+.status-row button{border:0;background:none;padding:4px 0;font-weight:700;color:var(--ink);display:inline-flex;gap:6px;align-items:center}
+.status-row button svg{width:15px;height:15px}
+.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.err{margin:12px 16px;padding:12px 14px;border-radius:10px;background:var(--danger-bg);border:1px solid var(--danger);font-size:14px}
+.err strong{display:block;color:var(--danger);margin-bottom:2px}
+.err .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+/* timeline */
+.sec-title{display:flex;align-items:baseline;justify-content:space-between;margin:26px 0 8px}
+.sec-title h2{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700}
+.sec-title span{font-size:13px;color:var(--ink-3)}
+.tl{list-style:none;margin:0;padding:0;position:relative}
+.tl li{position:relative;display:grid;grid-template-columns:36px 1fr auto;align-items:center;min-height:46px}
+.tl .rail{align-self:stretch;position:relative}
+.tl .rail::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:6px;background:var(--accent)}
+.tl li:first-child .rail::before{top:50%}
+.tl li.last .rail::before{bottom:50%}
+.tl .dot{position:absolute;left:10px;top:50%;width:16px;height:16px;margin-top:-8px;border-radius:50%;background:var(--surface);border:2.5px solid var(--ink)}
+.tl .stop-btn{all:unset;cursor:pointer;display:block;padding:9px 8px 9px 4px;min-width:0}
+.tl .stop-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
+.tl .nm{font-size:15px;font-weight:500;line-height:1.25}
+.tl .code{font-size:12px;color:var(--ink-3)}
+.tl .eta{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:14px;color:var(--ink-2);padding-right:4px;text-align:right}
+.tl li.beyond .nm,.tl li.beyond .code{color:var(--ink-3)}
+.tl li.beyond .dot{border-color:var(--ink-3)}
+.tl li.mine{background:var(--surface);border-radius:10px;box-shadow:inset 0 0 0 2px var(--ink)}
+.tl li.mine .dot{width:22px;height:22px;margin-top:-11px;left:7px;background:var(--ink);border-color:var(--ink);box-shadow:0 0 0 3px var(--accent)}
+.tl li.mine .nm{font-weight:800}
+.tl li.mine .eta{color:var(--ink);font-weight:600}
+.mine-tag{display:inline-block;margin-left:6px;font-family:var(--display);font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--bg);background:var(--ink);padding:1px 5px;border-radius:4px;vertical-align:2px}
+.tl li.marker{min-height:0;padding:3px 0}
+.tl li.marker .rail::before{top:0;bottom:0}
+.vehicle{display:inline-flex;align-items:center;gap:8px;margin-left:-26px;position:relative;z-index:1;background:var(--accent);color:var(--accent-ink);border:2px solid var(--ink);border-radius:9px;padding:4px 10px 4px 7px;font-weight:700;font-size:13px;white-space:nowrap}
+.vehicle svg{width:18px;height:18px}
+.vehicle .num{font-weight:600}
+.marker .note{font-size:12px;color:var(--ink-2);padding-left:8px;grid-column:3}
+.set-row{grid-column:2 / 4;padding:0 4px 10px}
+.legend{font-size:12px;color:var(--ink-3);margin-top:10px}
+
+.foot{margin-top:28px;font-size:12px;color:var(--ink-3);line-height:1.5}
+.foot a{color:inherit}
+
+/* sheets */
+dialog{border:0;padding:0;background:var(--surface);color:var(--ink);width:min(560px,100vw);max-width:100vw;max-height:88vh;border-radius:16px 16px 0 0;margin:auto auto 0;box-shadow:0 -8px 40px rgba(0,0,0,.25)}
+@media (min-width:600px){dialog{border-radius:16px;margin:auto}}
+dialog::backdrop{background:rgba(10,10,12,.45)}
+.sheet{padding:18px 16px 22px;overflow:auto;max-height:88vh}
+.sheet h3{margin:0 0 4px;font-size:20px;font-weight:800;font-stretch:85%}
+.sheet p.hint{margin:0 0 14px;color:var(--ink-2);font-size:14px}
+.field{display:block;margin:12px 0}
+.field > span{display:block;font-size:13px;font-weight:700;margin-bottom:5px}
+.field small{display:block;color:var(--ink-3);font-size:12px;margin-top:4px}
+input[type=text],input[type=url],select,textarea{width:100%;border:1px solid var(--rule);background:var(--bg);border-radius:9px;padding:10px 12px;font-size:16px}
+textarea{font-family:var(--mono);font-size:14px;min-height:150px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:0}
+.seg{display:flex;border:1px solid var(--rule);border-radius:9px;overflow:hidden}
+.seg button{flex:1;border:0;background:var(--bg);padding:9px 6px;font-weight:600;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.row{display:flex;gap:10px}
+.row > *{flex:1}
+.btn{height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--ink);background:var(--ink);color:var(--bg);font-weight:700}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
+.btn[disabled]{opacity:.5}
+.actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.actions .btn{flex:1}
+.preview{max-height:200px;overflow:auto;border:1px solid var(--rule);border-radius:9px;margin-top:8px;font-size:13px}
+.preview div{display:flex;gap:10px;padding:5px 10px;border-top:1px solid var(--rule)}
+.preview div:first-child{border-top:0}
+.preview .code{width:64px;flex:none;color:var(--ink)}
+.msg{font-size:14px;margin-top:10px;color:var(--ink-2)}
+.msg.bad{color:var(--danger)}
+.msg.good{color:var(--ok)}
+hr.sep{border:0;border-top:1px solid var(--rule);margin:18px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><b aria-hidden="true"></b>Paragem</div>
+    <button class="icon-btn" id="btnTheme" aria-label="Switch theme" title="Theme"></button>
+    <button class="icon-btn" id="btnSettings" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    </button>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="Your lines"></nav>
+
+  <main id="main"></main>
+
+  <footer class="foot">
+    Unofficial data from the STCP website, for personal use. One request per stop per refresh, every 30&nbsp;s or slower, paused while this page is hidden.
+    Positions are inferred from arrival estimates; STCP publishes no GPS here.
+  </footer>
+</div>
+
+<!-- Add line -->
+<dialog id="dlgAdd"><form method="dialog" class="sheet" id="formAdd">
+  <h3>Add a line</h3>
+  <p class="hint">Fetch the stop list from STCP, or paste one yourself.</p>
+  <div class="seg" role="group" aria-label="Source">
+    <button type="button" data-mode="api" aria-pressed="true">From STCP</button>
+    <button type="button" data-mode="paste" aria-pressed="false">Paste stops</button>
+  </div>
+  <label class="field"><span>Line number</span><input type="text" name="short" placeholder="502" autocomplete="off" autocapitalize="characters" required></label>
+  <div data-pane="api">
+    <label class="field"><span>A stop code on this line</span><input type="text" name="probe" placeholder="BCM1" autocomplete="off" autocapitalize="characters">
+      <small>Used to look up the line's internal route_id via /api/stops/CODE/routes.</small></label>
+    <label class="field"><span>…or the internal route_id, if you know it</span><input type="text" name="rid" placeholder="optional" autocomplete="off">
+      <small>On stcp.pt/pt/linhas, open the line, then in your browser's developer tools find the request to /api/route/<b>ID</b>/stops.</small></label>
+  </div>
+  <div data-pane="paste" hidden>
+    <label class="field"><span>Direction name</span><input type="text" name="dirname" placeholder="Matosinhos (Mercado)" autocomplete="off"></label>
+    <label class="field"><span>Stops in order, one per line</span>
+      <textarea name="list" placeholder="BLRB2 Bolhão&#10;BLFZ1 Bolhão (Firmeza)&#10;JN3 Jornal de Notícias"></textarea>
+      <small>"CODE Name", "Name CODE", "Name (CODE)" or a comma-separated list all work.</small></label>
+    <div class="preview" id="pastePreview" hidden></div>
+  </div>
+  <label class="field"><span>Line colour</span><input type="text" name="color" placeholder="#F5D24C (filled from STCP when available)" autocomplete="off"></label>
+  <div class="msg" id="addMsg" role="status"></div>
+  <div class="actions">
+    <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+    <button class="btn" type="button" id="btnAddGo">Add line</button>
+  </div>
+</form></dialog>
+
+<!-- Line options -->
+<dialog id="dlgLine"><form method="dialog" class="sheet" id="formLine">
+  <h3 id="lineTitle">Line</h3>
+  <p class="hint" id="lineHint"></p>
+  <label class="field"><span>Line colour</span><input type="text" name="color" autocomplete="off"></label>
+  <label class="field"><span>Stop code to look up the route (for refreshing from STCP)</span><input type="text" name="probe" autocomplete="off" autocapitalize="characters"></label>
+  <div class="msg" id="lineMsg" role="status"></div>
+  <div class="actions">
+    <button class="btn ghost" type="button" id="btnLineRefresh">Load both directions from STCP</button>
+  </div>
+  <div class="actions">
+    <button class="btn danger" type="button" id="btnLineDelete">Remove line</button>
+    <button class="btn" type="button" id="btnLineSave">Save</button>
+  </div>
+</form></dialog>
+
+<!-- Settings -->
+<dialog id="dlgSettings"><form method="dialog" class="sheet" id="formSettings">
+  <h3>Settings</h3>
+  <label class="field"><span>Buses to follow at my stop</span>
+    <div class="seg" role="group" data-name="count"><button type="button" data-v="1">1</button><button type="button" data-v="2">2</button><button type="button" data-v="3">3</button></div></label>
+  <label class="field"><span>Refresh every</span>
+    <div class="seg" role="group" data-name="interval"><button type="button" data-v="30">30 s</button><button type="button" data-v="45">45 s</button><button type="button" data-v="60">60 s</button><button type="button" data-v="120">2 min</button></div></label>
+  <label class="field"><span>Look back at most</span>
+    <div class="seg" role="group" data-name="maxBack"><button type="button" data-v="8">8 stops</button><button type="button" data-v="15">15</button><button type="button" data-v="30">30</button></div>
+    <small>How many stops before yours the app may poll to place a bus. Fewer stops, fewer requests.</small></label>
+  <label class="field"><span>Theme</span>
+    <div class="seg" role="group" data-name="theme"><button type="button" data-v="auto">System</button><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div></label>
+  <hr class="sep">
+  <label class="field"><span>API address</span>
+    <input type="url" name="proxy" placeholder="Auto (stcp.pt, or this site's own /api)" autocomplete="off">
+    <small>Leave empty to try stcp.pt directly. If your browser blocks it, paste your proxy here, e.g. https://paragem-proxy.you.workers.dev</small></label>
+  <div class="row"><button class="btn ghost" type="button" id="btnTest">Test connection</button></div>
+  <div class="msg" id="testMsg" role="status"></div>
+  <hr class="sep">
+  <div class="row">
+    <button class="btn ghost" type="button" id="btnExport">Copy my setup</button>
+    <button class="btn ghost" type="button" id="btnImport">Paste a setup</button>
+  </div>
+  <div class="msg" id="ioMsg" role="status"></div>
+  <div class="actions">
+    <button class="btn danger" type="button" id="btnReset">Reset everything</button>
+    <button class="btn" value="close">Done</button>
+  </div>
+</form></dialog>
+
+<!-- ============ CORE: pure logic, no DOM. Extracted and tested by test/core.test.mjs ============ -->
+<script id="core">
+const Core = (() => {
+  const norm = s => String(s ?? '').trim().toUpperCase();
+  const routeOf = a => norm(a.route_short_name ?? a.route_long_name ?? a.route_id);
+
+  /** Arrivals at one stop for one line, keyed by trip_id (smallest non-negative minutes per trip). */
+  function lineArrivals(arrivals, line) {
+    const L = norm(line), byTrip = new Map();
+    for (const a of arrivals || []) {
+      if (routeOf(a) !== L) continue;
+      const m = Number(a.arrival_minutes);
+      if (a.arrival_minutes === null || a.arrival_minutes === '' || !Number.isFinite(m) || m < 0) continue;
+      const id = a.trip_id || `${L}@${a.estimated_arrival_time ?? m}`;
+      const prev = byTrip.get(id);
+      if (!prev || m < prev._m) byTrip.set(id, { ...a, _m: m });
+    }
+    return byTrip;
+  }
+
+  /**
+   * Poll my stop, then walk backwards toward the start of the line, `concurrency` stops at a time,
+   * until every followed bus has dropped out of a stop's list (that is where it currently is),
+   * or `maxBack` stops have been checked. Returns raw observations: Map(stopIndex -> Map(trip_id -> arrival)).
+   */
+  async function track({ fetchStop, stops, myIdx, line, count = 2, maxBack = 15, concurrency = 3 }) {
+    const obs = new Map();
+    const errors = [];
+    let requests = 1;
+    const mine = await fetchStop(stops[myIdx].id);         // a failure here is fatal: the caller shows it
+    obs.set(myIdx, lineArrivals(mine.arrivals, line));
+    const followed = [...obs.get(myIdx).values()].sort((a, b) => a._m - b._m).slice(0, count).map(a => a.trip_id || null);
+    const open = new Set(followed.filter(Boolean));
+    const floor = Math.max(0, myIdx - maxBack);
+    let k = myIdx - 1;
+    while (k >= floor && open.size) {
+      const batch = [];
+      for (let i = k; i >= floor && batch.length < concurrency; i--) batch.push(i);
+      const res = await Promise.allSettled(batch.map(i => fetchStop(stops[i].id)));
+      requests += batch.length;
+      let broken = false;
+      for (let j = 0; j < batch.length; j++) {
+        const i = batch[j];
+        if (res[j].status === 'rejected') { errors.push({ idx: i, error: res[j].reason }); broken = true; break; }
+        const m = lineArrivals(res[j].value.arrivals, line);
+        obs.set(i, m);
+        for (const t of [...open]) if (!m.has(t)) open.delete(t);
+        if (!open.size) break;
+      }
+      if (broken) break;
+      k -= batch.length;
+    }
+    return { obs, errors, requests, meta: { stop_name: mine.stop_name, last_updated: mine.last_updated, data_source: mine.data_source } };
+  }
+
+  /**
+   * Turn observations into "where is each bus I care about".
+   * Next stop = among the contiguous run of stops (counting back from my stop) that list the trip,
+   * the one with the smallest arrival_minutes (ties: the earlier stop).
+   */
+  function locate({ obs, stops, myIdx, count = 2, ghostMinutes = 10 }) {
+    const atMine = obs.get(myIdx);
+    if (!atMine) return [];
+    const polled = [...obs.keys()];
+    const lowest = Math.min(...polled);
+    return [...atMine.values()].sort((a, b) => a._m - b._m).slice(0, count).map(a => {
+      const t = a.trip_id;
+      const seen = [];
+      let i = myIdx;
+      while (i >= 0 && obs.has(i)) {
+        const x = obs.get(i).get(t || `__none__`) ?? (i === myIdx ? a : null);
+        if (!x) break;
+        seen.push([i, x]);
+        if (!t) break;                       // without a trip_id we cannot follow it across stops
+        i--;
+      }
+      const runEndedUnpolled = i >= 0 && !obs.has(i);   // ran into stops we did not check
+      let next = seen[0];
+      for (const s of seen) if (s[1]._m < next[1]._m || (s[1]._m === next[1]._m && s[0] < next[0])) next = s;
+      const nextIdx = next[0], nextMin = next[1]._m;
+      let state = 'moving';
+      if (!t) state = 'unknown';
+      else if (runEndedUnpolled && nextIdx === lowest && lowest > 0) state = 'far';
+      else if (nextIdx === 0) state = 'terminus';
+      else if (nextMin > ghostMinutes) state = 'scheduled';   // "approaching" a stop it won't reach for a long time = not started
+      if (state === 'moving' && nextIdx === myIdx && a._m <= 1) state = 'arriving';
+      const etas = {};
+      for (const [j, x] of seen) etas[j] = x._m;
+      return {
+        tripId: t, headsign: a.trip_headsign || '', minutes: a._m,
+        clock: a.estimated_arrival_time ?? null, delay: a.delay_minutes ?? null, status: a.status ?? null,
+        nextIdx, nextName: stops[nextIdx]?.name ?? '', nextMinutes: nextMin,
+        stopsAway: myIdx - nextIdx, state, etas,
+      };
+    });
+  }
+
+  /** Parse a pasted stop list. Returns [{id, code, name}]. */
+  function parseStopList(text) {
+    const isCode = s => /^[A-Z][A-Z0-9]{1,7}$/.test(s) && (/\d/.test(s) || s.length <= 4);
+    let rows = String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (rows.length === 1) rows = rows[0].split(/[,;]\s*(?=[A-Z][A-Z0-9]{1,7}\s)/).map(s => s.trim()).filter(Boolean);
+    const out = [];
+    for (let r of rows) {
+      r = r.replace(/^\d+\s*[.)]\s+/, '').replace(/[.,;]$/, '').trim();
+      let m, code, name;
+      if ((m = r.match(/^([A-Z][A-Z0-9]{1,7})\s*[\t,;|:–—-]?\s+(.+)$/)) && isCode(m[1])) { code = m[1]; name = m[2]; }
+      else if ((m = r.match(/^(.+?)\s*[([]([A-Z][A-Z0-9]{1,7})[)\]]$/)) && isCode(m[2])) { code = m[2]; name = m[1]; }
+      else if ((m = r.match(/^(.+?)\s*[\t,;|–—-]?\s+([A-Z][A-Z0-9]{1,7})$/)) && isCode(m[2])) { code = m[2]; name = m[1]; }
+      if (code) out.push({ id: code, code, name: name.replace(/^[\s,;|:–—-]+|[\s,;|:–—-]+$/g, '') });
+    }
+    return out;
+  }
+
+  /** Normalise /api/route/{id}/stops/direction output. */
+  function normaliseRouteStops(json) {
+    const list = Array.isArray(json) ? json : (json && (json.stops || json.data)) || [];
+    return list.map(s => ({
+      id: String(s.stop_id ?? s.stop_code ?? s.code),
+      code: String(s.stop_code ?? s.stop_id ?? s.code),
+      name: String(s.stop_name ?? s.name ?? ''),
+      seq: Number(s.stop_sequence ?? s.seq ?? 0),
+      lat: s.stop_lat ?? s.lat ?? null, lon: s.stop_lon ?? s.lon ?? null,
+    })).sort((a, b) => a.seq - b.seq);
+  }
+
+  /** Find a line's internal route_id and colour in /api/stops/{id}/routes output. */
+  function findRoute(json, line) {
+    const L = norm(line);
+    const list = Array.isArray(json) ? json : (json && (json.dropdown_routes || json.routes)) || [];
+    const hit = list.find(r => norm(r.route_short_name ?? r.route_slug ?? r.short_name) === L);
+    if (!hit) return null;
+    return { routeId: String(hit.route_id), color: normColor(hit.route_color ?? hit.color ?? hit.colour), name: hit.route_long_name || '' };
+  }
+
+  function normColor(c) {
+    if (!c) return null;
+    c = String(c).trim().replace(/^#?/, '#');
+    return /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : (/^#[0-9a-f]{3}$/i.test(c) ? c.toUpperCase() : null);
+  }
+
+  return { lineArrivals, track, locate, parseStopList, normaliseRouteStops, findRoute, normColor };
+})();
+if (typeof module !== 'undefined') module.exports = Core;
+</script>
+
+<!-- ============ APP ============ -->
+<script>
+(() => {
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const EXAMPLE_502 = `BLRB2 Bolhão
+BLFZ1 Bolhão (Firmeza)
+JN3 Jornal de Notícias
+PRR1 Pr. da República
+FIG Figueiroa
+CVA1 Carvalhosa
+HML1 Hospital Militar
+BVBR2 Boavista Brasília
+BCM1 Boavista-Casa da Música
+AGM1 Agramonte
+ACRD1 António Cardoso
+BSS1 Bessa
+FOCO1 Foco
+PINM1 Pinheiro Manso
+SRV3 Serralves
+PNV2 Paulo Novais
+FTM4 Fonte da Moura
+LGO2 Liceu Garcia Orta
+PRCD3 Parque da Cidade
+NEV2 Nevogilde
+MAL2 Malaca
+CQ5 Sea Life Castelo do Queijo
+PCID1 Pr. Cid. Salvador
+SAR1 Sousa Aroso
+AVM1 Av. Menéres
+MTSP1 Matosinhos Praia
+GODH5 Godinho
+LOTA1 Lota
+SP1 S. Pedro
+MATM6 Matosinhos Mercado`;
+
+function defaultState() {
+  return {
+    v: 1,
+    settings: { count: 2, interval: 30, maxBack: 15, theme: 'auto', proxy: '' },
+    activeLine: 'l502',
+    lines: [{
+      key: 'l502', short: '502', routeId: null, color: '#F5D24C', example: true, probe: 'BCM1',
+      dirs: [{ id: 'paste', name: 'Matosinhos (Mercado)', stops: Core.parseStopList(EXAMPLE_502), myStop: 'BCM1' }],
+      activeDir: 0,
+    }],
+  };
+}
+
+// ---------- storage ----------
+const KEY = 'paragem.v1';
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1 && Array.isArray(s.lines)) return s; } catch (e) {}
+  return defaultState();
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+let state = load();
+try { const p = new URLSearchParams(location.search).get('api'); if (p) { state.settings.proxy = p.replace(/\/+$/, ''); save(); } } catch (e) {}
+
+// ---------- theme ----------
+const ICONS = {
+  auto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>',
+  light: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
+  bus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="3" width="16" height="15" rx="3"/><path d="M4 11h16M8 21v-3M16 21v-3"/><circle cx="8" cy="14.5" r=".6" fill="currentColor"/><circle cx="16" cy="14.5" r=".6" fill="currentColor"/></svg>',
+  swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg>',
+  dots: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>',
+};
+function applyTheme() {
+  const t = state.settings.theme;
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = t;
+  $('#btnTheme').innerHTML = ICONS[t];
+  $('#btnTheme').setAttribute('aria-label', `Theme: ${t === 'auto' ? 'system' : t}. Tap to change.`);
+}
+$('#btnTheme').onclick = () => {
+  const order = ['auto', 'light', 'dark'];
+  state.settings.theme = order[(order.indexOf(state.settings.theme) + 1) % 3];
+  save(); applyTheme();
+};
+
+// ---------- colour ----------
+function inkFor(hex) {
+  const h = (Core.normColor(hex) || '#F5D24C').slice(1);
+  const f = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(f.slice(i, i + 2), 16) / 255).map(c => c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4);
+  const L = .2126 * r + .7152 * g + .0722 * b;
+  return (1.05) / (L + .05) > (L + .05) / .05 ? '#FFFFFF' : '#15171A';
+}
+function applyAccent(line) {
+  const c = Core.normColor(line?.color) || '#F5D24C';
+  document.documentElement.style.setProperty('--accent', c);
+  document.documentElement.style.setProperty('--accent-ink', inkFor(c));
+}
+
+// ---------- network ----------
+const STCP = 'https://stcp.pt';
+let apiBase = null;           // chosen after the first successful call
+let lastNetError = null;
+
+class ApiError extends Error { constructor(kind, msg, detail) { super(msg); this.kind = kind; this.detail = detail; } }
+
+function candidates() {
+  const c = [];
+  if (state.settings.proxy) c.push(state.settings.proxy.replace(/\/+$/, ''));
+  // When this page is served by the local proxy or a Worker, its own /api is the best bet.
+  if (/^https?:$/.test(location.protocol) && !/github\.io$/.test(location.hostname) && !c.includes(location.origin)) c.push(location.origin);
+  c.push(STCP);
+  return c;
+}
+
+async function getJSON(base, path, timeoutMs = 10000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(base + path, { signal: ctl.signal, headers: { Accept: 'application/json' }, cache: 'no-store' });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new ApiError('timeout', 'STCP did not answer within 10 seconds.');
+    if (!navigator.onLine) throw new ApiError('offline', 'You are offline.');
+    throw new ApiError('blocked', 'The browser could not reach the API.', base);
+  } finally { clearTimeout(t); }
+  if (!res.ok) throw new ApiError('http', `The API answered ${res.status}${res.statusText ? ' ' + res.statusText : ''}.`, path);
+  try { return await res.json(); } catch (e) { throw new ApiError('parse', 'The API sent something that is not JSON. It may have changed.', path); }
+}
+
+async function api(path) {
+  if (apiBase) {
+    try { return await getJSON(apiBase, path); }
+    catch (e) { if (e.kind !== 'blocked' && e.kind !== 'parse') throw e; apiBase = null; }
+  }
+  const errs = [];
+  for (const base of candidates()) {
+    try { const j = await getJSON(base, path); apiBase = base; return j; }
+    catch (e) { errs.push([base, e]); if (e.kind === 'offline') break; }
+  }
+  // Report the most telling failure: a real answer from STCP or the proxy beats a 404 from this page's own host.
+  const pick = errs.find(([b, e]) => e.kind !== 'blocked' && b !== location.origin) || errs.find(([, e]) => e.kind === 'blocked') || errs[0];
+  throw pick ? pick[1] : new ApiError('blocked', 'No API address worked.');
+}
+
+async function fetchStop(id) {
+  const j = await api(`/api/stops/${encodeURIComponent(id)}/realtime`);
+  if (!j || !Array.isArray(j.arrivals)) throw new ApiError('parse', 'The realtime answer has no "arrivals" list. The API may have changed.');
+  return j;
+}
+
+// ---------- live state ----------
+let live = { busy: false, buses: null, obs: null, err: null, at: null, requests: 0, partial: null, meta: null };
+let timer = null, tickTimer = null, nextAt = 0, runId = 0;
+
+const line = () => state.lines.find(l => l.key === state.activeLine) || state.lines[0];
+const dir = () => { const l = line(); return l?.dirs[l.activeDir] || l?.dirs[0]; };
+const myIdx = () => { const d = dir(); return d ? d.stops.findIndex(s => s.id === d.myStop) : -1; };
+
+async function refresh() {
+  clearTimeout(timer);
+  const d = dir(), mi = myIdx();
+  if (!d || mi < 0) { live = { ...live, busy: false, buses: null, err: null }; render(); return; }
+  const id = ++runId;
+  live.busy = true; renderStatus();
+  try {
+    const r = await Core.track({ fetchStop, stops: d.stops, myIdx: mi, line: line().short, count: state.settings.count, maxBack: state.settings.maxBack, concurrency: 3 });
+    if (id !== runId) return;
+    live = { busy: false, obs: r.obs, buses: Core.locate({ obs: r.obs, stops: d.stops, myIdx: mi, count: state.settings.count }), err: null, at: new Date(), requests: r.requests, partial: r.errors[0] || null, meta: r.meta };
+  } catch (e) {
+    if (id !== runId) return;
+    live = { ...live, busy: false, err: e instanceof ApiError ? e : new ApiError('parse', e.message || String(e)) };
+  }
+  render();
+  schedule();
+}
+function schedule() {
+  clearTimeout(timer);
+  const ms = Math.max(30, state.settings.interval) * 1000;
+  nextAt = Date.now() + ms;
+  if (!document.hidden) timer = setTimeout(refresh, ms);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { clearTimeout(timer); return; }
+  if (!live.at || Date.now() - live.at.getTime() >= Math.max(30, state.settings.interval) * 1000) refresh(); else schedule();
+});
+
+// ---------- formatting ----------
+function clockOf(b) {
+  const c = b.clock;
+  if (c && /T/.test(c)) { const d = new Date(c); if (!isNaN(d)) return d.toTimeString().slice(0, 5); }
+  if (c && /^\d{1,2}:\d{2}/.test(c)) return c.slice(0, 5).padStart(5, '0');
+  return new Date(Date.now() + b.minutes * 60000).toTimeString().slice(0, 5);
+}
+function delayPill(b) {
+  const d = Math.round(Number(b.delay));   // STCP sends fractional minutes, e.g. 11.2
+  if (b.delay === null || b.delay === undefined || b.delay === '' || !Number.isFinite(d)) {
+    return b.status ? `<span class="pill">${esc(String(b.status).replace(/_/g, ' '))}</span>` : '';
+  }
+  if (d >= 1) return `<span class="pill late">${d} min late</span>`;
+  if (d <= -1) return `<span class="pill">${-d} min early</span>`;
+  return `<span class="pill ok">on time</span>`;
+}
+function whereText(b, stops) {
+  switch (b.state) {
+    case 'arriving': return ['Arriving now', ''];
+    case 'terminus': return ['At the first stop', `leaves ${esc(stops[0].name)} in ${b.nextMinutes} min`];
+    case 'scheduled': return ['Not started yet', 'timetable estimate, no bus on the way'];
+    case 'far': return [`${b.stopsAway}+ stops away`, `beyond the ${state.settings.maxBack} stops checked`];
+    case 'unknown': return ['Position unknown', 'no trip_id from STCP'];
+    default: return [`${b.stopsAway} ${b.stopsAway === 1 ? 'stop' : 'stops'} away`, `next: ${esc(b.nextName)} in ${b.nextMinutes} min`];
+  }
+}
+
+// ---------- render ----------
+function renderTabs() {
+  $('#tabs').innerHTML = state.lines.map(l => `
+    <button class="tab" data-key="${esc(l.key)}" aria-current="${l.key === state.activeLine}">
+      <span class="sw" style="background:${esc(Core.normColor(l.color) || '#F5D24C')};color:${inkFor(l.color)}">${esc(l.short)}</span>${esc(l.dirs[l.activeDir]?.name || '')}
+    </button>`).join('') + `<button class="tab add" id="tabAdd">+ Add line</button>`;
+  $('#tabs').querySelectorAll('[data-key]').forEach(b => b.onclick = () => {
+    if (state.activeLine === b.dataset.key) return;
+    state.activeLine = b.dataset.key; save(); live = { busy: false }; render(); refresh();
+  });
+  $('#tabAdd').onclick = openAdd;
+}
+
+function errorBox(e) {
+  const kinds = {
+    blocked: ['Blocked by the browser', `The request to the STCP API was refused before it arrived, almost always CORS. Set up the small proxy from the README and paste its address in Settings.`],
+    offline: ['Offline', 'Reconnect and it will refresh on its own.'],
+    timeout: ['STCP is slow to answer', e.message],
+    http: ['The API returned an error', `${e.message} The unofficial API may have changed or be down for a moment.`],
+    parse: ['Unexpected answer from STCP', e.message],
+  };
+  const [t, m] = kinds[e.kind] || ['Something went wrong', e.message];
+  return `<div class="err" role="alert"><strong>${esc(t)}</strong>${esc(m)}
+    <div class="acts"><button class="chip-btn" data-act="retry">Try again</button>${e.kind === 'blocked' || e.kind === 'http' ? '<button class="chip-btn" data-act="settings">API settings</button>' : ''}</div></div>`;
+}
+
+function render() {
+  const l = line();
+  applyAccent(l);
+  renderTabs();
+  const main = $('#main');
+  if (!l) { main.innerHTML = `<div class="panel"><div class="empty">No lines yet. Add one to start.</div></div>`; return; }
+  const d = dir(), mi = myIdx(), stops = d.stops;
+  const twoDirs = l.dirs.length > 1;
+  const other = twoDirs ? l.dirs[(l.activeDir + 1) % l.dirs.length].name : null;
+
+  let panel;
+  if (mi < 0) {
+    panel = `<div class="panel"><div class="empty">Tap a stop below and choose <b>Set as my stop</b>. The app then follows the next ${state.settings.count === 1 ? 'bus' : state.settings.count + ' buses'} coming to it.</div></div>`;
+  } else {
+    const head = `<div class="panel-head"><span class="k">My stop</span><span class="stopname">${esc(stops[mi].name)}</span><span class="code">${esc(stops[mi].code)}</span></div>`;
+    let body = '';
+    if (live.err) body = errorBox(live.err);
+    if (live.buses) {
+      if (!live.buses.length) body += `<div class="empty">No ${esc(l.short)} expected here in the next hour.</div>`;
+      body += live.buses.map(b => {
+        const [w, sub] = whereText(b, stops);
+        const muted = b.state === 'scheduled';
+        return `<div class="bus${muted ? ' muted' : ''}">
+          <div class="min">${b.minutes}<small>min</small></div>
+          <div><div class="where">${w}</div><div class="sub">${sub}${b.headsign ? `${sub ? ' · ' : ''}to ${esc(b.headsign)}` : ''}</div></div>
+          <div class="right">${muted ? '<span class="pill">scheduled</span>' : delayPill(b)}<div class="clock">${clockOf(b)}</div></div>
+        </div>`;
+      }).join('');
+      if (live.partial) body += `<div class="empty" style="font-size:13px">Could not check ${esc(stops[live.partial.idx].name)}; positions before it are uncertain.</div>`;
+    } else if (!live.err) body += `<div class="empty">Loading arrivals…</div>`;
+    const ds = live.meta?.data_source && !/real/i.test(live.meta.data_source) ? ` · ${esc(live.meta.data_source)}` : '';
+    panel = `<section class="panel" aria-live="polite">${head}${body}
+      <div class="status-row"><span class="upd" id="upd" title="${live.requests ? live.requests + ' requests in the last refresh' : ''}${ds}"></span>
+      <button data-act="retry" id="btnRefresh">${ICONS.refresh}<span>Refresh</span></button></div></section>`;
+  }
+
+  // timeline
+  const buses = (live.buses || []).filter(b => b.state !== 'scheduled' && b.state !== 'unknown');
+  const firstEtas = buses[0]?.etas || {};
+  const lowest = live.obs ? Math.min(...live.obs.keys()) : null;
+  let rows = '';
+  stops.forEach((s, i) => {
+    for (const [n, b] of buses.entries()) {
+      const at = b.state === 'far' ? lowest : b.nextIdx;
+      if (at !== i) continue;
+      const label = b.state === 'terminus' ? 'at first stop' : b.state === 'far' ? `${b.stopsAway}+ stops` : b.state === 'arriving' ? 'arriving' : `${b.stopsAway} ${b.stopsAway === 1 ? 'stop' : 'stops'}`;
+      rows += `<li class="marker"><div class="rail"></div><div><span class="vehicle" title="Bus ${n + 1}">${ICONS.bus}<span>${n === 0 ? 'Next' : n === 1 ? '2nd' : '3rd'}</span><span class="num">${b.minutes} min</span></span></div><div class="note">${label}</div></li>`;
+    }
+    const beyond = mi >= 0 && i > mi;
+    const eta = mi >= 0 && i <= mi && firstEtas[i] !== undefined ? `${firstEtas[i]}′` : '';
+    rows += `<li class="stop${i === mi ? ' mine' : ''}${beyond ? ' beyond' : ''}${i === stops.length - 1 ? ' last' : ''}" data-i="${i}">
+      <div class="rail"><span class="dot"></span></div>
+      <button class="stop-btn" aria-expanded="false" aria-label="${esc(s.name)} ${esc(s.code)}${i === mi ? ', my stop' : ''}"><div class="nm">${esc(s.name)}${i === mi ? '<span class="mine-tag">MY STOP</span>' : ''}</div><div class="code">${esc(s.code)}</div></button>
+      <div class="eta">${eta}</div>
+    </li>`;
+  });
+
+  main.innerHTML = `
+    <section class="line-head">
+      <div class="badge" aria-label="Line ${esc(l.short)}">${esc(l.short)}</div>
+      <div class="dir">
+        <div class="lbl">Towards ${l.example ? '<span class="tag">Example data</span>' : ''}</div>
+        <div class="to">${esc(d.name)}</div>
+        <div class="dir-actions">
+          <button class="chip-btn" id="btnSwap" ${twoDirs ? '' : 'disabled'} title="${twoDirs ? 'Switch to ' + esc(other) : 'Only one direction loaded'}">${ICONS.swap}${twoDirs ? 'To ' + esc(other) : 'One direction'}</button>
+          <button class="chip-btn" id="btnLine">${ICONS.dots}Line</button>
+        </div>
+      </div>
+    </section>
+    ${panel}
+    <div class="sec-title"><h2>${stops.length} stops</h2><span>${buses.length ? 'minutes for the next bus' : ''}</span></div>
+    <ol class="tl" id="tl">${rows}</ol>
+    ${l.example ? `<p class="legend">This stop list is the example from your brief. Open <b>Line</b> to load both directions from STCP.</p>` : ''}`;
+
+  main.querySelectorAll('[data-act="retry"]').forEach(b => b.onclick = () => refresh());
+  main.querySelectorAll('[data-act="settings"]').forEach(b => b.onclick = openSettings);
+  $('#btnSwap').onclick = () => { if (!twoDirs) return; l.activeDir = (l.activeDir + 1) % l.dirs.length; save(); live = { busy: false }; render(); refresh(); };
+  $('#btnLine').onclick = openLine;
+  $('#tl').querySelectorAll('.stop-btn').forEach(btn => btn.onclick = () => toggleSetRow(btn.closest('li')));
+  renderStatus();
+}
+
+function toggleSetRow(li) {
+  const open = li.querySelector('.set-row');
+  document.querySelectorAll('.set-row').forEach(r => r.remove());
+  $('#tl').querySelectorAll('.stop-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  if (open) return;
+  const i = Number(li.dataset.i), d = dir();
+  const isMine = d.stops[i].id === d.myStop;
+  const row = document.createElement('div');
+  row.className = 'set-row';
+  row.innerHTML = isMine ? `<button class="chip-btn">Clear my stop</button>` : `<button class="chip-btn">Set as my stop</button>`;
+  row.firstElementChild.onclick = () => { d.myStop = isMine ? null : d.stops[i].id; save(); live = { busy: false }; render(); refresh(); };
+  li.appendChild(row);
+  li.querySelector('.stop-btn').setAttribute('aria-expanded', 'true');
+}
+
+function renderStatus() {
+  const u = $('#upd'), b = $('#btnRefresh');
+  if (!u) return;
+  if (b) { b.disabled = !!live.busy; b.querySelector('svg')?.classList.toggle('spin', !!live.busy); }
+  if (live.busy) { u.textContent = 'Updating…'; return; }
+  if (!live.at) { u.textContent = live.err ? 'Not updated' : ''; return; }
+  const s = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
+  u.innerHTML = `Updated <span class="num">${live.at.toTimeString().slice(0, 8)}</span>${document.hidden ? '' : ` · <span class="num">${String(s).padStart(2, '\u2007')}s</span>`}`;
+}
+tickTimer = setInterval(renderStatus, 1000);
+
+// ---------- loading a line from STCP ----------
+async function loadFromStcp({ short, probe, routeId }) {
+  let color = null, rid = routeId ? String(routeId).trim() : '';
+  if (!rid) {
+    if (!probe) throw new Error('Give a stop code on the line, or its route_id.');
+    const r = Core.findRoute(await api(`/api/stops/${encodeURIComponent(probe)}/routes`), short);
+    if (!r) throw new Error(`Line ${short} was not found at stop ${probe}. Check both.`);
+    rid = r.routeId; color = r.color;
+  } else if (probe) {
+    try { const r = Core.findRoute(await api(`/api/stops/${encodeURIComponent(probe)}/routes`), short); if (r) color = r.color; } catch (e) {}
+  }
+  const dirs = [];
+  for (const di of [0, 1]) {
+    try {
+      const stops = Core.normaliseRouteStops(await api(`/api/route/${encodeURIComponent(rid)}/stops/direction?direction_id=${di}`));
+      if (stops.length) dirs.push({ id: di, name: stops[stops.length - 1].name, stops, myStop: null });
+    } catch (e) { if (di === 0) throw e; }
+  }
+  if (!dirs.length) throw new Error(`route_id ${rid} returned no stops.`);
+  return { rid, color, dirs };
+}
+function explain(e) {
+  if (e instanceof ApiError && e.kind === 'blocked') return 'The browser blocked the request (CORS). Use the paste option, or set up the proxy in Settings.';
+  return e.message || String(e);
+}
+
+// ---------- add line dialog ----------
+let addMode = 'api';
+function openAdd() {
+  const f = $('#formAdd'); f.reset(); $('#addMsg').textContent = ''; $('#pastePreview').hidden = true;
+  setAddMode('api'); $('#dlgAdd').showModal();
+}
+function setAddMode(m) {
+  addMode = m;
+  $('#formAdd').querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  $('#formAdd').querySelectorAll('[data-pane]').forEach(p => p.hidden = p.dataset.pane !== m);
+}
+$('#formAdd').querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setAddMode(b.dataset.mode));
+$('#formAdd').list.addEventListener('input', e => {
+  const s = Core.parseStopList(e.target.value), pv = $('#pastePreview');
+  pv.hidden = !e.target.value.trim();
+  pv.innerHTML = s.length ? s.map((x, i) => `<div><span class="code">${esc(x.code)}</span><span>${i + 1}. ${esc(x.name)}</span></div>`).join('') : '<div>No stops recognised yet.</div>';
+});
+$('#btnAddGo').onclick = async () => {
+  const f = $('#formAdd'), msg = $('#addMsg');
+  const short = f.short.value.trim().toUpperCase();
+  if (!short) { msg.className = 'msg bad'; msg.textContent = 'Enter the line number.'; return; }
+  const base = { key: 'l' + Date.now().toString(36), short, routeId: null, color: Core.normColor(f.color.value) || null, example: false, probe: f.probe.value.trim().toUpperCase(), activeDir: 0 };
+  try {
+    if (addMode === 'paste') {
+      const stops = Core.parseStopList(f.list.value);
+      if (stops.length < 2) throw new Error('Paste at least two stops, one per line, each with its code.');
+      base.dirs = [{ id: 'paste', name: f.dirname.value.trim() || stops[stops.length - 1].name, stops, myStop: null }];
+      base.probe = base.probe || stops[0].code;
+    } else {
+      msg.className = 'msg'; msg.textContent = 'Asking STCP…';
+      const r = await loadFromStcp({ short, probe: base.probe, routeId: f.rid.value });
+      Object.assign(base, { routeId: r.rid, dirs: r.dirs, color: base.color || r.color });
+    }
+    base.color = base.color || '#F5D24C';
+    state.lines.push(base); state.activeLine = base.key; save();
+    $('#dlgAdd').close(); live = { busy: false }; render(); refresh();
+  } catch (e) {
+    msg.className = 'msg bad'; msg.textContent = explain(e) + (addMode === 'api' ? ' You can switch to "Paste stops".' : '');
+  }
+};
+
+// ---------- line dialog ----------
+function openLine() {
+  const l = line(), f = $('#formLine');
+  $('#lineTitle').textContent = `Line ${l.short}`;
+  $('#lineHint').textContent = `${l.dirs.length} direction${l.dirs.length > 1 ? 's' : ''} loaded${l.routeId ? ` · route_id ${l.routeId}` : ''}${l.example ? ' · example data' : ''}.`;
+  f.color.value = l.color || ''; f.probe.value = l.probe || l.dirs[0]?.stops[0]?.code || '';
+  $('#lineMsg').textContent = ''; $('#dlgLine').showModal();
+}
+$('#btnLineSave').onclick = () => {
+  const l = line(), f = $('#formLine');
+  const c = Core.normColor(f.color.value); if (f.color.value && !c) { $('#lineMsg').className = 'msg bad'; $('#lineMsg').textContent = 'Use a hex colour like #F5D24C.'; return; }
+  l.color = c || l.color; l.probe = f.probe.value.trim().toUpperCase() || l.probe; save(); $('#dlgLine').close(); render();
+};
+$('#btnLineRefresh').onclick = async () => {
+  const l = line(), f = $('#formLine'), msg = $('#lineMsg');
+  msg.className = 'msg'; msg.textContent = 'Asking STCP…';
+  try {
+    const r = await loadFromStcp({ short: l.short, probe: f.probe.value.trim().toUpperCase(), routeId: l.routeId });
+    const mine = new Map(l.dirs.map(d => [d.myStop, true]));
+    r.dirs.forEach(d => { const hit = d.stops.find(s => mine.has(s.id)); if (hit) d.myStop = hit.id; });
+    const keep = r.dirs.findIndex(d => d.myStop);
+    Object.assign(l, { routeId: r.rid, dirs: r.dirs, example: false, color: r.color || l.color, probe: f.probe.value.trim().toUpperCase() || l.probe, activeDir: Math.max(0, keep) });
+    save(); msg.className = 'msg good'; msg.textContent = `Loaded ${r.dirs.length} direction(s), route_id ${r.rid}.`;
+    live = { busy: false }; render(); refresh();
+  } catch (e) { msg.className = 'msg bad'; msg.textContent = explain(e); }
+};
+$('#btnLineDelete').onclick = () => {
+  const l = line();
+  if (!confirm(`Remove line ${l.short}?`)) return;
+  state.lines = state.lines.filter(x => x !== l); state.activeLine = state.lines[0]?.key || null; save();
+  $('#dlgLine').close(); live = { busy: false }; render(); refresh();
+};
+
+// ---------- settings dialog ----------
+function openSettings() {
+  const f = $('#formSettings');
+  f.querySelectorAll('.seg[data-name]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(String(state.settings[seg.dataset.name]) === b.dataset.v))));
+  f.proxy.value = state.settings.proxy || '';
+  $('#testMsg').textContent = apiBase ? `Working via ${apiBase}` : ''; $('#testMsg').className = 'msg';
+  $('#ioMsg').textContent = '';
+  $('#dlgSettings').showModal();
+}
+$('#btnSettings').onclick = openSettings;
+$('#formSettings').querySelectorAll('.seg[data-name]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.onclick = () => {
+  const k = seg.dataset.name; state.settings[k] = k === 'theme' ? b.dataset.v : Number(b.dataset.v); save();
+  seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  if (k === 'theme') applyTheme(); else { render(); refresh(); }
+}));
+$('#formSettings').proxy.addEventListener('change', e => { state.settings.proxy = e.target.value.trim().replace(/\/+$/, ''); apiBase = null; save(); });
+$('#btnTest').onclick = async () => {
+  state.settings.proxy = $('#formSettings').proxy.value.trim().replace(/\/+$/, ''); save();
+  const msg = $('#testMsg'); msg.className = 'msg'; msg.textContent = 'Testing…';
+  const probe = dir()?.stops[Math.max(0, myIdx())]?.id || 'BCM1';
+  const out = [];
+  for (const base of candidates()) {
+    try { const j = await getJSON(base, `/api/stops/${encodeURIComponent(probe)}/realtime`); out.push(`${base}: works (${(j.arrivals || []).length} arrivals at ${probe})`); apiBase = apiBase || base; }
+    catch (e) { out.push(`${base}: ${e.kind === 'blocked' ? 'blocked (CORS or unreachable)' : e.message}`); }
+  }
+  msg.className = 'msg ' + (apiBase ? 'good' : 'bad'); msg.innerHTML = out.map(esc).join('<br>');
+  if (apiBase) refresh();
+};
+$('#btnExport').onclick = async () => {
+  const txt = JSON.stringify(state);
+  try { await navigator.clipboard.writeText(txt); $('#ioMsg').textContent = 'Copied. Paste it into Paragem on another device.'; }
+  catch (e) { prompt('Copy this:', txt); }
+};
+$('#btnImport').onclick = () => {
+  const txt = prompt('Paste a setup copied from Paragem:'); if (!txt) return;
+  try { const s = JSON.parse(txt); if (s.v !== 1 || !Array.isArray(s.lines)) throw 0; state = s; save(); applyTheme(); $('#dlgSettings').close(); live = { busy: false }; render(); refresh(); }
+  catch (e) { $('#ioMsg').className = 'msg bad'; $('#ioMsg').textContent = 'That is not a Paragem setup.'; }
+};
+$('#btnReset').onclick = () => { if (!confirm('Remove all lines and settings?')) return; state = defaultState(); save(); applyTheme(); $('#dlgSettings').close(); live = { busy: false }; render(); refresh(); };
+
+// close dialogs on backdrop tap
+document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+
+// ---------- PWA ----------
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+applyTheme();
+render();
+refresh();
+})();
+</script>
+</body>
+</html>

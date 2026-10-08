@@ -1,0 +1,7 @@
+name = "paragem-proxy"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+# Set this to your GitHub Pages origin once the app is published, e.g. "https://you.github.io"
+ALLOWED_ORIGIN = "https://adrianogpena.github.io"
