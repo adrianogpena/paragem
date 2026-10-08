@@ -74,7 +74,8 @@ It then opens full screen like an app. With option A, the app shell is cached, s
 - **Add a line:** + Add line.
   - *From STCP:* enter the line number and the code of any stop on it (e.g. `502` + `BCM1`). The app finds the internal `route_id` through `/api/stops/BCM1/routes` and then loads both directions. If you already know the route_id, you can enter it directly. stcp.pt/pt/linhas no longer puts route_ids in its HTML; to find one, open the line page with your browser's developer tools on the Network tab and look for a request to `/api/route/ID/stops`.
   - *Paste stops:* one stop per line, in order. `CODE Name`, `Name CODE`, `Name (CODE)` and the comma-separated format from your brief all work. A preview shows what was recognised.
-- **Settings:** buses to follow (1–3), refresh interval (30 s minimum), how many stops back the app may poll, theme, API address, and copy/paste of your whole setup to move it to another device.
+- **Settings:** buses to follow (1–3), refresh interval (30 s minimum), how many stops back the app may poll, theme, API address, and copy/paste of your whole setup.
+- **Move your setup to your phone:** Settings → *Send to another device* makes a link (the share sheet opens, so you can send it on WhatsApp). Open it once on the phone and confirm. The lines, stops and settings are saved there, and the plain address shows them from then on. The phone keeps its own API address. Each device keeps its own setup, so later changes don't sync. On Android the installed app shares Chrome's storage, so opening the link in Chrome updates it too.
 
 ## How a bus is located
 

@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 const html = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
 const src = html.match(/<script id="core">([\s\S]*?)<\/script>/)[1];
-const ctx = { module: { exports: {} } };
+const ctx = { module: { exports: {} }, Blob, Response, CompressionStream, DecompressionStream, btoa, atob };
 vm.runInNewContext(src, ctx);
 const Core = ctx.module.exports;
 // objects from the vm realm have other prototypes; compare as plain data
@@ -162,6 +162,21 @@ await test('no bus passed: the forward walk stops after `ahead` stops', async ()
   eq(calls.slice(-6), stops.slice(MY + 1, MY + 7).map(s => s.id));
   eq(r.requests, 1 + 3 + 6);
   eq(Core.locatePassed({ obs: r.obs, stops, myIdx: MY }), null);
+});
+
+await test('setup link round trip drops proxy and coordinates, rejects bad links', async () => {
+  const withCoords = stops.map((s, i) => ({ ...s, seq: i + 1, lat: 41.1, lon: -8.6 }));
+  const setup = { v: 1, settings: { count: 2, interval: 30, maxBack: 15, theme: 'dark', proxy: 'http://localhost:8787' }, activeLine: 'l502',
+    lines: [{ key: 'l502', short: '502', color: '#F5D24C', activeDir: 0, dirs: [
+      { id: 0, name: 'Matosinhos', stops: withCoords, myStop: 'BCM1' }, { id: 1, name: 'Bolhão', stops: [...withCoords].reverse(), myStop: 'AGM1' }] }] };
+  const code = await Core.encodeSetup(setup);
+  assert.match(code, /^z[A-Za-z0-9_-]+$/);
+  assert.ok(code.length < 2000, `link part is ${code.length} chars`);
+  const back = await Core.decodeSetup(code);
+  eq(back.settings, { ...setup.settings, proxy: '' });
+  eq(back.lines[0].dirs[1].myStop, 'AGM1');
+  eq(back.lines[0].dirs[0].stops[0], { id: 'BLRB2', code: 'BLRB2', name: 'Bolhão', seq: 1 });
+  for (const bad of ['', 'xabc', 'zabc', code.slice(0, 40)]) await assert.rejects(Core.decodeSetup(bad));
 });
 
 const fixture = name => JSON.parse(readFileSync(fileURLToPath(new URL(`fixtures/${name}`, import.meta.url)), 'utf8'));

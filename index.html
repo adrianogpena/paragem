@@ -164,6 +164,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ink);outline-off
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 .row{display:flex;gap:10px}
 .row > *{flex:1}
+.hint-s{display:block;color:var(--ink-3);font-size:12px;margin:6px 0 12px}
 .btn{height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--ink);background:var(--ink);color:var(--bg);font-weight:700}
 .btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
 .btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
@@ -266,6 +267,10 @@ hr.sep{border:0;border-top:1px solid var(--rule);margin:18px 0}
   <div class="msg" id="testMsg" role="status"></div>
   <hr class="sep">
   <div class="row">
+    <button class="btn" type="button" id="btnSend">Send to another device</button>
+  </div>
+  <small class="hint-s">Makes a link with your lines and stops. Open it once on the other phone and the setup is saved there.</small>
+  <div class="row">
     <button class="btn ghost" type="button" id="btnExport">Copy my setup</button>
     <button class="btn ghost" type="button" id="btnImport">Paste a setup</button>
   </div>
@@ -273,6 +278,16 @@ hr.sep{border:0;border-top:1px solid var(--rule);margin:18px 0}
   <div class="actions">
     <button class="btn danger" type="button" id="btnReset">Reset everything</button>
     <button class="btn" value="close">Done</button>
+  </div>
+</form></dialog>
+
+<!-- Setup received through a link -->
+<dialog id="dlgReceive"><form method="dialog" class="sheet">
+  <h3 id="rcvTitle">Use this setup?</h3>
+  <p class="hint" id="rcvText"></p>
+  <div class="actions" id="rcvActs">
+    <button class="btn ghost" value="keep">Keep mine</button>
+    <button class="btn" value="use">Use this setup</button>
   </div>
 </form></dialog>
 
@@ -454,7 +469,33 @@ const Core = (() => {
     return /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : (/^#[0-9a-f]{3}$/i.test(c) ? c.toUpperCase() : null);
   }
 
-  return { lineArrivals, track, locate, locatePassed, parseStopList, normaliseRouteStops, findRoute, normColor };
+  /** A setup is valid if it has the storage version and a list of lines, each with directions. */
+  const isSetup = s => !!s && s.v === 1 && Array.isArray(s.lines) && s.lines.every(l => l && l.key && Array.isArray(l.dirs));
+
+  /**
+   * Setup <-> text for a link: deflate-raw + base64url, prefixed "z" (format version).
+   * The proxy address stays per device, and unused coordinates are dropped to keep the link short.
+   */
+  async function encodeSetup(s) {
+    const slim = { ...s, settings: { ...s.settings, proxy: '' },
+      lines: s.lines.map(l => ({ ...l, dirs: l.dirs.map(d => ({ ...d, stops: d.stops.map(({ lat, lon, ...st }) => st) })) })) };
+    const stream = new Blob([JSON.stringify(slim)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return 'z' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  async function decodeSetup(code) {
+    if (typeof code !== 'string' || code[0] !== 'z') throw new Error('Not a Paragem setup link.');
+    const bin = atob(code.slice(1).replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const s = JSON.parse(await new Response(stream).text());
+    if (!isSetup(s)) throw new Error('Not a Paragem setup link.');
+    return s;
+  }
+
+  return { lineArrivals, track, locate, locatePassed, isSetup, encodeSetup, decodeSetup, parseStopList, normaliseRouteStops, findRoute, normColor };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
 </script>
@@ -945,6 +986,18 @@ $('#btnTest').onclick = async () => {
   msg.className = 'msg ' + (apiBase ? 'good' : 'bad'); msg.innerHTML = out.map(esc).join('<br>');
   if (apiBase) refresh();
 };
+$('#btnSend').onclick = async () => {
+  const msg = $('#ioMsg'); msg.className = 'msg';
+  let url;
+  try { url = `${location.origin}${location.pathname}#setup=${await Core.encodeSetup(state)}`; }
+  catch (e) { msg.className = 'msg bad'; msg.textContent = 'This browser cannot make a setup link.'; return; }
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Paragem setup', url }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); msg.textContent = 'Link copied. Send it to the other phone and open it there.'; }
+  catch (e) { prompt('Copy this link:', url); }
+};
 $('#btnExport').onclick = async () => {
   const txt = JSON.stringify(state);
   try { await navigator.clipboard.writeText(txt); $('#ioMsg').textContent = 'Copied. Paste it into Paragem on another device.'; }
@@ -957,6 +1010,34 @@ $('#btnImport').onclick = () => {
 };
 $('#btnReset').onclick = () => { if (!confirm('Remove all lines and settings?')) return; state = defaultState(); save(); applyTheme(); $('#dlgSettings').close(); live = { busy: false }; render(); refresh(); };
 
+// ---------- setup received through a link (#setup=...) ----------
+async function receiveSetup() {
+  const m = location.hash.match(/^#setup=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);   // the link is only needed once
+  const dlg = $('#dlgReceive');
+  dlg.returnValue = ''; dlg.onclose = null;
+  let s;
+  try { s = await Core.decodeSetup(m[1]); }
+  catch (e) {
+    $('#rcvTitle').textContent = 'This link does not work';
+    $('#rcvText').textContent = 'It is not a Paragem setup, or it was cut off. Make a new one with Settings → Send to another device.';
+    $('#rcvActs').innerHTML = '<button class="btn" value="ok">OK</button>';
+    dlg.showModal(); return;
+  }
+  const names = s.lines.map(l => `${l.short} to ${l.dirs[l.activeDir]?.name || l.dirs[0]?.name || ''}`.trim());
+  $('#rcvTitle').textContent = 'Use this setup?';
+  $('#rcvActs').innerHTML = '<button class="btn ghost" value="keep">Keep mine</button><button class="btn" value="use">Use this setup</button>';
+  $('#rcvText').textContent = `${names.length === 1 ? 'Line' : names.length + ' lines'}: ${names.join(', ')}. This replaces the lines and settings on this device.`;
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'use') return;
+    state = { ...s, settings: { ...s.settings, proxy: state.settings.proxy || '' } };
+    save(); applyTheme(); live = { busy: false }; render(); refresh();
+  };
+  dlg.showModal();
+}
+window.addEventListener('hashchange', receiveSetup);
+
 // close dialogs on backdrop tap
 document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
 
@@ -968,6 +1049,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 applyTheme();
 render();
 refresh();
+receiveSetup();
 })();
 </script>
 </body>
